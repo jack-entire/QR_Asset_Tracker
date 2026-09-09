@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NEL — QR Asset Scanner</title>
+<style>
+  :root {
+    --delivery-color: #b8860b;
+    --delivery-bg: #fff6df;
+    --install-color: #1e7d32;
+    --install-bg: #e9f7ec;
+    --ink: #14181c;
+    --paper: #ffffff;
+    --border: #c9cfd6;
+    --danger: #b3261e;
+    --danger-bg: #fdecea;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--paper); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    display: flex; flex-direction: column; min-height: 100dvh;
+  }
+
+  /* ---- Top bar: mode toggle + register/device status ---- */
+  #topbar {
+    padding: 10px 12px 8px;
+    border-bottom: 3px solid var(--border);
+    transition: background-color 120ms ease;
+  }
+  body.mode-delivery #topbar { background: var(--delivery-bg); }
+  body.mode-install  #topbar { background: var(--install-bg); }
+
+  #jobBanner {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    color: #666; margin-bottom: 6px;
+  }
+
+  #modeToggle {
+    display: flex; gap: 8px;
+  }
+  .mode-btn {
+    flex: 1; padding: 14px 6px; font-size: 18px; font-weight: 700;
+    border: 3px solid var(--border); border-radius: 10px; background: #fff;
+    color: #555; cursor: pointer;
+  }
+  .mode-btn.active[data-mode="DELIVERY"] {
+    background: var(--delivery-color); color: #fff; border-color: var(--delivery-color);
+  }
+  .mode-btn.active[data-mode="INSTALL"] {
+    background: var(--install-color); color: #fff; border-color: var(--install-color);
+  }
+
+  #statusRow {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 8px; font-size: 12px; color: #444; gap: 8px; flex-wrap: wrap;
+  }
+  #statusRow button {
+    font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: #fff; color: #333; cursor: pointer;
+  }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    background: #eee; font-weight: 600;
+  }
+  .pill.warn { background: #fdecea; color: var(--danger); }
+
+  /* ---- Camera ---- */
+  #cameraWrap {
+    position: relative; width: 100%; aspect-ratio: 3 / 4; max-height: 46vh;
+    background: #000; overflow: hidden; flex-shrink: 0;
+  }
+  #video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #cameraOverlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #fff; background: rgba(0,0,0,0.55); text-align: center; padding: 16px; font-size: 14px;
+  }
+  #cameraOverlay.hidden { display: none; }
+  #scanFrame {
+    position: absolute; inset: 12%; border: 3px solid rgba(255,255,255,0.85); border-radius: 12px;
+    pointer-events: none;
+  }
+  #flashHit {
+    position: absolute; inset: 0; background: rgba(60, 200, 90, 0.35); opacity: 0; pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
+  /* ---- Scan list ---- */
+  #listWrap { flex: 1; overflow-y: auto; padding: 8px 10px 90px; }
+  #listWrap h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: #666; margin: 6px 2px; }
+  .scan-row {
+    display: flex; align-items: baseline; gap: 8px; padding: 10px 10px; margin-bottom: 6px;
+    border-radius: 8px; border-left: 6px solid #999; background: #f7f7f7; font-size: 15px;
+  }
+  .scan-row.action-DELIVERED { border-left-color: var(--delivery-color); background: var(--delivery-bg); }
+  .scan-row.action-INSTALLED { border-left-color: var(--install-color); background: var(--install-bg); }
+  .scan-row .tag { font-weight: 700; font-family: ui-monospace, Consolas, monospace; }
+  .scan-row .act { font-weight: 600; color: #555; }
+  .scan-row .time { margin-left: auto; color: #777; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .scan-row .flag { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--danger-bg); color: var(--danger); font-weight: 700; }
+  #emptyMsg { color: #777; padding: 24px 10px; text-align: center; font-size: 14px; }
+
+  /* ---- Bottom bar ---- */
+  #bottombar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: var(--paper); border-top: 3px solid var(--border);
+  }
+  #scanCount { font-weight: 700; font-size: 15px; }
+  #scanCount small { display: block; font-weight: 400; color: #666; font-size: 11px; }
+  #exportBtn {
+    margin-left: auto; padding: 14px 20px; font-size: 16px; font-weight: 700;
+    border-radius: 10px; border: none; background: var(--ink); color: #fff; cursor: pointer;
+  }
+  #exportBtn:active { opacity: 0.8; }
+
+  /* ---- Modal ---- */
+  #modalRoot {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50;
+  }
+  #modalRoot[hidden] { display: none; }
+  .modal-card {
+    background: #fff; border-radius: 14px; padding: 20px; max-width: 380px; width: 100%;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  }
+  .modal-card h3 { margin: 0 0 8px; font-size: 18px; }
+  .modal-card p { margin: 0 0 16px; font-size: 15px; color: #333; line-height: 1.4; }
+  .modal-card input[type="text"] {
+    width: 100%; padding: 12px; font-size: 16px; border: 2px solid var(--border);
+    border-radius: 8px; margin-bottom: 14px;
+  }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .modal-actions button {
+    padding: 12px 18px; font-size: 15px; font-weight: 700; border-radius: 8px; border: none; cursor: pointer;
+  }
+  .btn-secondary { background: #eee; color: #333; }
+  .btn-primary { background: var(--ink); color: #fff; }
+  .btn-danger { background: var(--danger); color: #fff; }
+
+  a.linklike { color: #333; text-decoration: underline; cursor: pointer; background: none; border: none; font: inherit; padding: 0; }
+</style>
+</head>
+<body class="mode-delivery">
+
+  <div id="topbar">
+    <div id="jobBanner"></div>
+    <div id="modeToggle">
+      <button class="mode-btn active" data-mode="DELIVERY" type="button">DELIVERY</button>
+      <button class="mode-btn" data-mode="INSTALL" type="button">INSTALL</button>
+    </div>
+    <div id="statusRow">
+      <span>Register: <span id="registerPill" class="pill">none loaded</span></span>
+      <span>Device: <span id="devicePill" class="pill">not set</span></span>
+      <button id="loadRegisterBtn" type="button">Load register CSV</button>
+      <button id="setDeviceBtn" type="button">Set device</button>
+      <label style="display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" id="speakToggle"> speak
+      </label>
+    </div>
+  </div>
+
+  <div id="cameraWrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="scanFrame"></div>
+    <div id="flashHit"></div>
+    <div id="cameraOverlay">Starting camera…</div>
+  </div>
+
+  <div id="listWrap">
+    <h2>Scans this session</h2>
+    <div id="scanList"></div>
+    <div id="emptyMsg">No scans yet. Point the camera at a QR label.</div>
+  </div>
+
+  <div id="bottombar">
+    <div id="scanCount">0 scans<small id="scanCountToday">0 today</small></div>
+    <button id="exportBtn" type="button">Export CSV</button>
+  </div>
+
+  <input type="file" id="csvFileInput" accept=".csv,text/csv" hidden>
+
+  <div id="modalRoot" hidden>
+    <div class="modal-card" id="modalCard"></div>
+  </div>
+
+<!-- Vendored locally (no CDN) so the page keeps working offline once cached. -->
+<script src="jsQR.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ===========================================================================
+  //  Job identity - THE ONLY TWO LINES TO CHANGE when copying this whole
+  //  scan_page/ folder to set up a new job (a different site, different
+  //  register, different client). Everything below is scoped by JOB_ID so
+  //  that two jobs' pages can safely share a browser, or even a hosting
+  //  origin (e.g. two GitHub Pages project sites both live under the same
+  //  <you>.github.io origin - browser storage doesn't care about the URL
+  //  path, only the origin, so without this a phone that's opened both
+  //  jobs' links would see ONE shared register/scan log/cache between them).
+  //  Also update <title> above and the JOB_LABEL text shown in the header.
+  // ===========================================================================
+  const JOB_ID = "NEL";                    // short, stable, no spaces - used in storage keys & export filenames
+  const JOB_LABEL = "NEL Tunnel — Mechanical";  // shown in the header so it's obvious which job this is
+
+  // ===========================================================================
+  //  Storage helpers - every localStorage access is wrapped, per the brief.
+  //  A private-browsing tab or a browser blocking site data must not crash
+  //  the page; it just won't remember anything between reloads.
+  // ===========================================================================
+  const LS_KEYS = {
+    register: `qrtrack.${JOB_ID}.register.v1`,
+    device: `qrtrack.${JOB_ID}.device.v1`,
+    scans: `qrtrack.${JOB_ID}.scanlog.v1`,
+    speak: `qrtrack.${JOB_ID}.speak.v1`,
+  };
+
+  function lsGet(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch (e) {
+      console.warn("localStorage read failed for", key, e);
+      return fallback;
+    }
+  }
+  function lsSet(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (e) {
+      console.warn("localStorage write failed for", key, e);
+      return false;
+    }
+  }
+
+  // ===========================================================================
+  //  State
+  // ===========================================================================
+  let register = lsGet(LS_KEYS.register, null);      // { items: [...], loadedAt } or null
+  let deviceName = lsGet(LS_KEYS.device, null);       // string or null
+  let scanLog = lsGet(LS_KEYS.scans, []);             // [{TagID, timestamp, action, device}]
+  let speakEnabled = lsGet(LS_KEYS.speak, false);
+  let mode = "DELIVERY";                              // never persisted across reloads on purpose -
+                                                        // always start a fresh scan session in DELIVERY
+                                                        // so the toggle is a deliberate, visible choice
+                                                        // each time the app is opened, not inferred state.
+  const lastSeenAt = new Map();                        // TagID -> ms timestamp, for the 3s debounce
+  const DEBOUNCE_MS = 3000;
+
+  // ===========================================================================
+  //  Melbourne-local ISO8601 timestamp (handles AEST/AEDT automatically by
+  //  comparing how the same instant renders in Melbourne vs UTC, rather than
+  //  hardcoding a fixed +10:00).
+  // ===========================================================================
+  function melbourneIso(date) {
+    date = date || new Date();
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Australia/Melbourne",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    }).formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+
+    const localAsUtc = Date.UTC(
+      Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+      Number(parts.hour), Number(parts.minute), Number(parts.second)
+    );
+    const offsetMinutes = Math.round((localAsUtc - date.getTime()) / 60000);
+    const sign = offsetMinutes >= 0 ? "+" : "-";
+    const abs = Math.abs(offsetMinutes);
+    const offH = String(Math.floor(abs / 60)).padStart(2, "0");
+    const offM = String(abs % 60).padStart(2, "0");
+
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}${sign}${offH}:${offM}`;
+  }
+  function melbourneDateOnly(date) {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Melbourne" }).format(date || new Date());
+  }
+
+  // ===========================================================================
+  //  Modal system (custom, not native alert/confirm/prompt - those block the
+  //  whole page/tab and don't fit the site-glove-friendly styling).
+  // ===========================================================================
+  const modalRoot = document.getElementById("modalRoot");
+  const modalCard = document.getElementById("modalCard");
+
+  function closeModal() { modalRoot.hidden = true; modalCard.innerHTML = ""; }
+
+  function showConfirm({ title, message, confirmLabel, cancelLabel, danger }) {
+    return new Promise((resolve) => {
+      modalCard.innerHTML = `
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(message)}</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="modalCancel">${escapeHtml(cancelLabel || "Cancel")}</button>
+          <button type="button" class="${danger ? "btn-danger" : "btn-primary"}" id="modalConfirm">${escapeHtml(confirmLabel || "OK")}</button>
+        </div>`;
+      modalRoot.hidden = false;
+      document.getElementById("modalCancel").onclick = () => { closeModal(); resolve(false); };
+      document.getElementById("modalConfirm").onclick = () => { closeModal(); resolve(true); };
+    });
+  }
+
+  function showDeviceNamePrompt(existing) {
+    return new Promise((resolve) => {
+      modalCard.innerHTML = `
+        <h3>Device name</h3>
+        <p>Used to tag every scan with which phone/tablet made it (shown in the export filename).</p>
+        <input type="text" id="deviceInput" placeholder="e.g. Jack-Phone" value="${escapeHtml(existing || "")}">
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="modalCancel">Cancel</button>
+          <button type="button" class="btn-primary" id="modalConfirm">Save</button>
+        </div>`;
+      modalRoot.hidden = false;
+      const input = document.getElementById("deviceInput");
+      input.focus();
+      const save = () => {
+        const v = sanitizeDeviceName(input.value);
+        closeModal();
+        resolve(v || null);
+      };
+      document.getElementById("modalCancel").onclick = () => { closeModal(); resolve(null); };
+      document.getElementById("modalConfirm").onclick = save;
+      input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") save(); });
+    });
+  }
+
+  // Device name is free text a person types, but it flows straight into a
+  // filename (scans_<JOB>_<device>_<date>.csv) and merge_scans.py's job-
+  // mismatch check assumes that's exactly 3 underscore-separated segments.
+  // An underscore in the device name (or a character Windows won't allow in
+  // a filename) would silently break both. Sanitize once, here, rather than
+  // at every place deviceName gets used.
+  const DEVICE_NAME_UNSAFE = /[_<>:"/\\|?*]/g;
+  function sanitizeDeviceName(s) {
+    return s.trim().replace(DEVICE_NAME_UNSAFE, "-").slice(0, 40);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
+  // ===========================================================================
+  //  Register (trial_items.csv) loading + lookup
+  // ===========================================================================
+  function parseCsv(text) {
+    // Small, deliberate CSV parser (handles quoted fields with commas/quotes) -
+    // no external dependency needed for a simple 5-column register file.
+    const rows = [];
+    let row = [], field = "", inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+        } else { field += c; }
+      } else if (c === '"') {
+        inQuotes = true;
+      } else if (c === ",") {
+        row.push(field); field = "";
+      } else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); field = "";
+        if (row.some((f) => f !== "")) rows.push(row);
+        row = [];
+      } else {
+        field += c;
+      }
+    }
+    if (field !== "" || row.length) { row.push(field); rows.push(row); }
+    if (!rows.length) return [];
+    const headers = rows[0].map((h) => h.trim());
+    return rows.slice(1).map((r) => {
+      const obj = {};
+      headers.forEach((h, idx) => { obj[h] = (r[idx] || "").trim(); });
+      return obj;
+    });
+  }
+
+  function loadRegisterFromCsvText(text) {
+    const items = parseCsv(text).filter((r) => r.TagID);
+    if (!items.length) throw new Error("No TagID rows found in that CSV.");
+    // generate_qr_codes.py / create_trial_workbook.py both refuse a CSV with
+    // duplicate TagIDs, but this auto-load path can also be fed a hand-
+    // edited or different-job CSV directly - don't hard-fail here (that
+    // would silently break the zero-tap auto-load for everything, not just
+    // the duplicate), but don't stay silent either. findInRegister() below
+    // uses first-match, so a duplicate just means the later row is unreachable.
+    const seen = new Set();
+    for (const r of items) {
+      if (seen.has(r.TagID)) {
+        console.warn(`Register CSV has a duplicate TagID '${r.TagID}' - only the first row for it will ever be matched.`);
+      }
+      seen.add(r.TagID);
+    }
+    register = { items, loadedAt: Date.now() };
+    lsSet(LS_KEYS.register, register);
+    renderStatus();
+  }
+
+  function findInRegister(tagId) {
+    if (!register) return null;
+    return register.items.find((r) => r.TagID === tagId) || null;
+  }
+
+  // ===========================================================================
+  //  Scan log
+  // ===========================================================================
+  function saveScanLog() { lsSet(LS_KEYS.scans, scanLog); }
+
+  function alreadyLoggedSameAction(tagId, action) {
+    return scanLog.find((s) => s.TagID === tagId && s.action === action) || null;
+  }
+
+  async function recordScan(tagId, action) {
+    const entry = { TagID: tagId, timestamp: melbourneIso(), action, device: deviceName || "UNKNOWN_DEVICE" };
+    scanLog.unshift(entry);
+    saveScanLog();
+    renderScanList();
+    renderCounts();
+    return entry;
+  }
+
+  // ===========================================================================
+  //  Feedback: beep (WebAudio, no external file), vibration, optional speech
+  // ===========================================================================
+  let audioCtx = null;
+  function beep(freq, ms) {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.value = freq;
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + ms / 1000);
+    } catch (e) { /* no audio available - not fatal */ }
+  }
+  function vibrate(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) { /* ignore */ }
+  }
+  function speak(text) {
+    if (!speakEnabled) return;
+    try {
+      if (!window.speechSynthesis) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.05;
+      window.speechSynthesis.speak(u);
+    } catch (e) { /* ignore */ }
+  }
+  function flashHit() {
+    const el = document.getElementById("flashHit");
+    el.style.opacity = "1";
+    setTimeout(() => { el.style.opacity = "0"; }, 150);
+  }
+
+  // ===========================================================================
+  //  Handling a decoded QR value
+  // ===========================================================================
+  let processing = false;
+
+  async function handleDecodedTag(rawText) {
+    const tagId = (rawText || "").trim();
+    if (!tagId) return;
+
+    // Check `processing` FIRST: while a confirm modal is open (waiting on the
+    // user), every incoming decode - of this tag or any other - is ignored
+    // outright, without touching the debounce clock. Otherwise a decode that
+    // arrives mid-modal would still update lastSeenAt and silently push the
+    // debounce window further out, so a deliberate re-scan right after the
+    // user dismisses the modal could get swallowed with no feedback at all.
+    if (processing) return;
+
+    const now = Date.now();
+    const lastSeen = lastSeenAt.get(tagId);
+    if (lastSeen && now - lastSeen < DEBOUNCE_MS) return;   // silent debounce, not a popup
+    lastSeenAt.set(tagId, now);
+
+    processing = true;
+    try {
+      const action = mode === "DELIVERY" ? "DELIVERED" : "INSTALLED";
+
+      const known = findInRegister(tagId);
+      if (!known) {
+        const proceed = await showConfirm({
+          title: "Unknown tag",
+          message: `"${tagId}" is not in the loaded register. Log it anyway? (It will show up in the exception report.)`,
+          confirmLabel: "Log anyway",
+          cancelLabel: "Discard",
+          danger: true,
+        });
+        if (!proceed) return;
+      }
+
+      const dup = alreadyLoggedSameAction(tagId, action);
+      if (dup) {
+        const dupTime = new Date(dup.timestamp).toLocaleTimeString();
+        const proceed = await showConfirm({
+          title: "Already scanned",
+          message: `"${tagId}" was already logged as ${action} at ${dupTime} (this device or an earlier export). Log it again?`,
+          confirmLabel: "Log again",
+          cancelLabel: "Skip",
+        });
+        if (!proceed) return;
+      }
+
+      await recordScan(tagId, action);
+      flashHit();
+      beep(action === "DELIVERED" ? 700 : 900, 120);
+      vibrate(60);
+      speak(`${tagId} ${action.toLowerCase()}`);
+    } finally {
+      processing = false;
+    }
+  }
+
+  // ===========================================================================
+  //  Camera + decode loop: native BarcodeDetector where available, jsQR fallback.
+  //  jsQR is vendored locally (scan_page/jsQR.js) - no CDN at runtime.
+  // ===========================================================================
+  const video = document.getElementById("video");
+  const overlay = document.getElementById("cameraOverlay");
+  let decodeCanvas = null, decodeCtx = null;
+  let barcodeDetector = null;
+  let scanTimer = null;
+
+  async function setUpDetector() {
+    if ("BarcodeDetector" in window) {
+      try {
+        const formats = await window.BarcodeDetector.getSupportedFormats();
+        if (formats.includes("qr_code")) {
+          barcodeDetector = new window.BarcodeDetector({ formats: ["qr_code"] });
+          return "native BarcodeDetector";
+        }
+      } catch (e) { /* fall through to jsQR */ }
+    }
+    if (!window.jsQR) {
+      overlay.textContent = "QR decoder failed to load (jsQR.js missing). Camera scanning unavailable.";
+      overlay.classList.remove("hidden");
+      return null;
+    }
+    return "jsQR fallback";
+  }
+
+  const jsQRDecode = window.jsQR && window.jsQR.default ? window.jsQR.default : window.jsQR;
+
+  async function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      overlay.textContent = "This browser has no camera API. Open this page over HTTPS (or localhost) in Chrome.";
+      overlay.classList.remove("hidden");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 960 } },
+        audio: false,
+      });
+      video.srcObject = stream;
+      await video.play();
+      overlay.classList.add("hidden");
+    } catch (e) {
+      overlay.textContent = "Camera access failed: " + (e && e.message ? e.message : e) +
+        ". On a phone, this page must be served over HTTPS (or via the insecure-origin flag for testing).";
+      overlay.classList.remove("hidden");
+      return;
+    }
+
+    decodeCanvas = document.createElement("canvas");
+    decodeCtx = decodeCanvas.getContext("2d", { willReadFrequently: true });
+    const which = await setUpDetector();
+    if (which) scanLoop();
+  }
+
+  async function scanLoop() {
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      try {
+        if (barcodeDetector) {
+          const results = await barcodeDetector.detect(video);
+          if (results.length) await handleDecodedTag(results[0].rawValue);
+        } else if (jsQRDecode) {
+          decodeCanvas.width = video.videoWidth;
+          decodeCanvas.height = video.videoHeight;
+          decodeCtx.drawImage(video, 0, 0, decodeCanvas.width, decodeCanvas.height);
+          const imgData = decodeCtx.getImageData(0, 0, decodeCanvas.width, decodeCanvas.height);
+          const result = jsQRDecode(imgData.data, imgData.width, imgData.height, { inversionAttempts: "dontInvert" });
+          if (result && result.data) await handleDecodedTag(result.data);
+        }
+      } catch (e) { console.warn("decode error", e); }
+    }
+    scanTimer = setTimeout(scanLoop, 180);   // ~5.5 decode attempts/sec - plenty fast, kind to battery
+  }
+
+  // ===========================================================================
+  //  Rendering
+  // ===========================================================================
+  function renderStatus() {
+    const pill = document.getElementById("registerPill");
+    if (register && register.items.length) {
+      pill.textContent = `${register.items.length} items`;
+      pill.classList.remove("warn");
+    } else {
+      pill.textContent = "none loaded";
+      pill.classList.add("warn");
+    }
+    const dpill = document.getElementById("devicePill");
+    if (deviceName) { dpill.textContent = deviceName; dpill.classList.remove("warn"); }
+    else { dpill.textContent = "not set"; dpill.classList.add("warn"); }
+  }
+
+  function renderCounts() {
+    document.getElementById("scanCount").firstChild.textContent = `${scanLog.length} scans`;
+    const today = melbourneDateOnly();
+    const todayCount = scanLog.filter((s) => (s.timestamp || "").slice(0, 10) === today).length;
+    document.getElementById("scanCountToday").textContent = `${todayCount} today`;
+  }
+
+  function renderScanList() {
+    const listEl = document.getElementById("scanList");
+    const emptyEl = document.getElementById("emptyMsg");
+    if (!scanLog.length) { listEl.innerHTML = ""; emptyEl.style.display = "block"; return; }
+    emptyEl.style.display = "none";
+    listEl.innerHTML = scanLog.slice(0, 200).map((s) => {
+      const time = new Date(s.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const unknown = register && !findInRegister(s.TagID);
+      return `<div class="scan-row action-${escapeHtml(s.action)}">
+        <span class="tag">${escapeHtml(s.TagID)}</span>
+        <span class="act">${escapeHtml(s.action)}</span>
+        ${unknown ? '<span class="flag">not in register</span>' : ""}
+        <span class="time">${escapeHtml(time)}</span>
+      </div>`;
+    }).join("");
+  }
+
+  // ===========================================================================
+  //  CSV export - dumps the full local scan log every time (append-only event
+  //  log semantics: merge_scans.py's earliest-wins logic makes re-exports and
+  //  overlapping exports safe, so this never risks silently dropping a day's
+  //  scans if someone forgets to export daily).
+  // ===========================================================================
+  function scansToCsv(rows) {
+    const header = "TagID,timestamp,action,device";
+    const lines = rows.map((r) => [r.TagID, r.timestamp, r.action, r.device]
+      .map((v) => {
+        v = String(v == null ? "" : v);
+        return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      }).join(","));
+    return [header].concat(lines).join("\r\n") + "\r\n";
+  }
+
+  async function doExport() {
+    if (!deviceName) {
+      const name = await showDeviceNamePrompt("");
+      if (!name) return;
+      deviceName = name;
+      lsSet(LS_KEYS.device, deviceName);
+      renderStatus();
+    }
+    if (!scanLog.length) {
+      await showConfirm({ title: "Nothing to export", message: "No scans recorded yet on this device.", confirmLabel: "OK", cancelLabel: "OK" });
+      return;
+    }
+    const csv = scansToCsv(scanLog.slice().reverse());   // chronological order in the file
+    // Job in the filename is a belt-and-suspenders safety net, not the
+    // thing that actually routes data - each job's scans/ folder only ever
+    // gets that job's own exports (see JOB_ID note above). But if two jobs'
+    // CSVs ever end up in the same inbox/email thread before being sorted,
+    // the filename alone should make it obvious which is which.
+    const filename = `scans_${JOB_ID}_${deviceName}_${melbourneDateOnly()}.csv`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  // ===========================================================================
+  //  Wiring
+  // ===========================================================================
+  document.querySelectorAll(".mode-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      mode = btn.dataset.mode;
+      document.querySelectorAll(".mode-btn").forEach((b) => b.classList.toggle("active", b === btn));
+      document.body.classList.toggle("mode-delivery", mode === "DELIVERY");
+      document.body.classList.toggle("mode-install", mode === "INSTALL");
+    });
+  });
+
+  document.getElementById("loadRegisterBtn").addEventListener("click", () => {
+    document.getElementById("csvFileInput").click();
+  });
+  document.getElementById("csvFileInput").addEventListener("change", async (ev) => {
+    const file = ev.target.files[0];
+    ev.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      loadRegisterFromCsvText(text);
+    } catch (e) {
+      await showConfirm({ title: "Couldn't load CSV", message: String(e.message || e), confirmLabel: "OK", cancelLabel: "OK" });
+    }
+  });
+
+  document.getElementById("setDeviceBtn").addEventListener("click", async () => {
+    const name = await showDeviceNamePrompt(deviceName || "");
+    if (name) { deviceName = name; lsSet(LS_KEYS.device, deviceName); renderStatus(); }
+  });
+
+  document.getElementById("speakToggle").addEventListener("change", (ev) => {
+    speakEnabled = ev.target.checked;
+    lsSet(LS_KEYS.speak, speakEnabled);
+  });
+
+  document.getElementById("exportBtn").addEventListener("click", doExport);
+
+  // ===========================================================================
+  //  Init
+  // ===========================================================================
+  document.getElementById("jobBanner").textContent = JOB_LABEL;
+  document.getElementById("speakToggle").checked = !!speakEnabled;
+  renderStatus();
+  renderCounts();
+  renderScanList();
+  startCamera();
+
+  // First open on a phone that's never used this page before: try to load
+  // trial_items.csv automatically from right next to index.html, so there's
+  // nothing to pick or hunt for - the register is just there. Silent no-op
+  // if it's missing (e.g. hosted without it) or unreachable (offline before
+  // the first successful load) - the manual "Load register CSV" button is
+  // still there as a fallback either way.
+  if (!register && "fetch" in window) {
+    fetch("trial_items.csv").then((r) => {
+      if (!r.ok) throw new Error("no trial_items.csv alongside index.html");
+      return r.text();
+    }).then((text) => {
+      loadRegisterFromCsvText(text);
+    }).catch((e) => console.warn("Auto-load of trial_items.csv skipped:", e.message || e));
+  }
+
+  // Ask for the device name up front (non-blocking - camera starts either
+  // way) so real scans get tagged correctly from the first one, rather than
+  // only being asked the first time someone taps Export.
+  if (!deviceName) {
+    showDeviceNamePrompt("").then((name) => {
+      if (name) { deviceName = name; lsSet(LS_KEYS.device, deviceName); renderStatus(); }
+    });
+  }
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW registration failed", e));
+  }
+})();
+</script>
+</body>
+</html>
