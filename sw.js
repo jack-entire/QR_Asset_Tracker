@@ -15,7 +15,7 @@
 // JOB_ID note in index.html). Cache Storage is shared across the WHOLE
 // origin, not scoped per path, so without this a naive fixed cache name
 // would let one job's activate handler below delete another job's cache.
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const CACHE_PREFIX = "qr-scan-page-" + self.registration.scope;
 const CACHE_NAME = CACHE_PREFIX + "-" + CACHE_VERSION;
 // Deliberately NOT "./" here - it resolves differently across hosts (plain

@@ -563,7 +563,17 @@
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 960 } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 }, height: { ideal: 960 },
+          // Continuous autofocus is what actually dominates "why is this
+          // slow" on a close-up printed label - phones default to a single
+          // fixed focus that can sit soft for a second or more. This is an
+          // "advanced" constraint (best-effort, per spec) so it's silently
+          // ignored on browsers/cameras that don't support it rather than
+          // failing getUserMedia.
+          advanced: [{ focusMode: "continuous" }],
+        },
         audio: false,
       });
       video.srcObject = stream;
@@ -598,7 +608,12 @@
         }
       } catch (e) { console.warn("decode error", e); }
     }
-    scanTimer = setTimeout(scanLoop, 180);   // ~5.5 decode attempts/sec - plenty fast, kind to battery
+    scanTimer = setTimeout(scanLoop, 80);   // ~12 decode attempts/sec - was 180ms/~5.5 per sec, felt
+                                             // slow to pick up a code; native BarcodeDetector is
+                                             // hardware-decoded (negligible cost per attempt) and
+                                             // jsQR on a single small frame is still comfortably
+                                             // under 80ms on any phone this runs on, so this doesn't
+                                             // meaningfully change battery/CPU load in practice.
   }
 
   // ===========================================================================
