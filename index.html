@@ -4,6 +4,39 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NEL — QR Asset Scanner</title>
+<script>
+  // ===========================================================================
+  //  Bootstrap job identity - the ONE thing to edit when reusing this file as
+  //  the seed for a brand-new device with no existing data (a different site,
+  //  register, client). Once a device has used this page, jobs are added and
+  //  switched entirely from the in-app "+ Job" control (see JOB_ID_RE and
+  //  switchJob() further down) - these two lines only matter for what a
+  //  fresh device's first job is called, and as the id any pre-multi-job
+  //  data on a returning device is found under (see migrateLegacySingleJob()
+  //  further down). Also update <title> above.
+  //
+  //  Defined here, in a tiny script at the very top of <head> rather than in
+  //  the main script at the bottom of <body>, purely so a returning
+  //  visitor's saved dark/light preference (global, not per-job - see
+  //  GLOBAL_KEYS further down) can be applied to <html> BEFORE the page
+  //  paints - otherwise every reload would flash the light theme first, then
+  //  flip to dark a moment later.
+  // ===========================================================================
+  window.JOB_ID = "NEL";
+  window.JOB_LABEL = "NEL Tunnel — Mechanical";
+  (function () {
+    try {
+      // Global key first; falls back to the old per-(bootstrap-)job key so a
+      // device that saved "dark" before this version's one-time migration
+      // has run doesn't flash light once on the very next load.
+      var raw = localStorage.getItem("qrtrack.theme.v1");
+      if (raw === null) raw = localStorage.getItem("qrtrack." + window.JOB_ID + ".theme.v1");
+      if (raw && JSON.parse(raw) === "dark") {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    } catch (e) { /* localStorage unavailable - defaults to light, matches the rest of the app's fail-open behavior */ }
+  })();
+</script>
 <style>
   :root {
     --delivery-color: #b8860b;
@@ -15,7 +48,40 @@
     --border: #c9cfd6;
     --danger: #b3261e;
     --danger-bg: #fdecea;
+    --surface: #ffffff;
+    --surface-alt: #eeeeee;
+    --text-muted: #555555;
+    --text-faint: #777777;
+    --scan-row-bg: #f7f7f7;
+    --scan-row-border: #999999;
+    --shadow: rgba(0, 0, 0, 0.3);
+    --focus-ring: #2f6fed;
     color-scheme: light;
+  }
+  /* Dark palette: not a dimmed/compromise mode - tuned to hold the same
+     field-legibility bar as light mode (bright daylight to low light), just
+     inverted. Never auto-follows prefers-color-scheme - the theme toggle is
+     an explicit, remembered choice that defaults to light on a fresh device
+     (see the <head> script above and applyTheme() below). */
+  :root[data-theme="dark"] {
+    --delivery-color: #e2a53a;
+    --delivery-bg: #3a2f12;
+    --install-color: #52b975;
+    --install-bg: #163521;
+    --ink: #eef2f5;
+    --paper: #14181c;
+    --border: #3a4149;
+    --danger: #ff7a6e;
+    --danger-bg: #3a1a16;
+    --surface: #1c2127;
+    --surface-alt: #262c33;
+    --text-muted: #b7c0c8;
+    --text-faint: #8d97a0;
+    --scan-row-bg: #1d2329;
+    --scan-row-border: #55606a;
+    --shadow: rgba(0, 0, 0, 0.6);
+    --focus-ring: #7ab8ff;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -26,9 +92,26 @@
   }
   body {
     display: flex; flex-direction: column; min-height: 100dvh;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+  *:focus-visible {
+    outline: 3px solid var(--focus-ring); outline-offset: 2px;
   }
 
-  /* ---- Top bar: mode toggle + register/device status ---- */
+  /* ---- Banners (storage-not-persisting warning, first-run hint) ---- */
+  .banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 12px; font-size: 13px; font-weight: 600; line-height: 1.3;
+  }
+  .banner[hidden] { display: none; }
+  .banner-warn { background: var(--danger-bg); color: var(--danger); border-bottom: 2px solid var(--danger); }
+  .banner-info { background: var(--surface-alt); color: var(--ink); border-bottom: 2px solid var(--border); }
+  .banner button {
+    background: none; border: none; font-size: 18px; line-height: 1; cursor: pointer;
+    color: inherit; padding: 0 4px; flex-shrink: 0;
+  }
+
+  /* ---- Top bar: job selector + mode toggle + register/device status ---- */
   #topbar {
     padding: 10px 12px 8px;
     border-bottom: 3px solid var(--border);
@@ -37,9 +120,17 @@
   body.mode-delivery #topbar { background: var(--delivery-bg); }
   body.mode-install  #topbar { background: var(--install-bg); }
 
-  #jobBanner {
-    font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-    color: #666; margin-bottom: 6px;
+  #jobRow {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  }
+  #jobSelect {
+    flex: 1; min-width: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text-muted);
+  }
+  #addJobBtn {
+    font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap;
   }
 
   #modeToggle {
@@ -47,8 +138,8 @@
   }
   .mode-btn {
     flex: 1; padding: 14px 6px; font-size: 18px; font-weight: 700;
-    border: 3px solid var(--border); border-radius: 10px; background: #fff;
-    color: #555; cursor: pointer;
+    border: 3px solid var(--border); border-radius: 10px; background: var(--surface);
+    color: var(--text-muted); cursor: pointer;
   }
   .mode-btn.active[data-mode="DELIVERY"] {
     background: var(--delivery-color); color: #fff; border-color: var(--delivery-color);
@@ -59,17 +150,18 @@
 
   #statusRow {
     display: flex; justify-content: space-between; align-items: center;
-    margin-top: 8px; font-size: 12px; color: #444; gap: 8px; flex-wrap: wrap;
+    margin-top: 8px; font-size: 12px; color: var(--text-muted); gap: 8px; flex-wrap: wrap;
   }
   #statusRow button {
     font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
-    background: #fff; color: #333; cursor: pointer;
+    background: var(--surface); color: var(--ink); cursor: pointer;
   }
+  #helpBtn { font-weight: 700; }
   .pill {
     display: inline-block; padding: 2px 8px; border-radius: 999px;
-    background: #eee; font-weight: 600;
+    background: var(--surface-alt); font-weight: 600;
   }
-  .pill.warn { background: #fdecea; color: var(--danger); }
+  .pill.warn { background: var(--danger-bg); color: var(--danger); }
 
   /* ---- Camera ---- */
   #cameraWrap {
@@ -78,13 +170,25 @@
   }
   #video { width: 100%; height: 100%; object-fit: cover; display: block; }
   #cameraOverlay {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px;
+    align-items: center; justify-content: center;
     color: #fff; background: rgba(0,0,0,0.55); text-align: center; padding: 16px; font-size: 14px;
   }
   #cameraOverlay.hidden { display: none; }
+  /* Always theme-independent (bg is a fixed dark camera backdrop regardless
+     of the page's light/dark setting) - a light button on it stays legible
+     either way, rather than borrowing --ink/--surface which flip meaning
+     between themes and would sometimes render dark-on-dark. */
+  .overlay-btn {
+    padding: 10px 18px; font-size: 15px; font-weight: 700; border-radius: 8px; border: none; cursor: pointer;
+    background: #ffffff; color: #14181c;
+  }
+  .overlay-btn:active { opacity: 0.85; }
   #scanFrame {
-    position: absolute; inset: 12%; border: 3px solid rgba(255,255,255,0.85); border-radius: 12px;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    border: 3px solid rgba(255,255,255,0.85); border-radius: 12px;
     pointer-events: none;
+    /* width/height are set in JS - see sizeScanFrame() for why they can't be CSS. */
   }
   #flashHit {
     position: absolute; inset: 0; background: rgba(60, 200, 90, 0.35); opacity: 0; pointer-events: none;
@@ -93,18 +197,30 @@
 
   /* ---- Scan list ---- */
   #listWrap { flex: 1; overflow-y: auto; padding: 8px 10px 90px; }
-  #listWrap h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: #666; margin: 6px 2px; }
+  #listHeader {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 10px;
+    margin: 6px 2px;
+  }
+  #listHeader h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin: 0;
+  }
+  #listSubtext { font-size: 12px; color: var(--text-faint); flex: 1 1 auto; }
+  #clearLogBtn {
+    font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  #clearLogBtn:disabled { opacity: 0.5; cursor: not-allowed; }
   .scan-row {
     display: flex; align-items: baseline; gap: 8px; padding: 10px 10px; margin-bottom: 6px;
-    border-radius: 8px; border-left: 6px solid #999; background: #f7f7f7; font-size: 15px;
+    border-radius: 8px; border-left: 6px solid var(--scan-row-border); background: var(--scan-row-bg); font-size: 15px;
   }
   .scan-row.action-DELIVERED { border-left-color: var(--delivery-color); background: var(--delivery-bg); }
   .scan-row.action-INSTALLED { border-left-color: var(--install-color); background: var(--install-bg); }
   .scan-row .tag { font-weight: 700; font-family: ui-monospace, Consolas, monospace; }
-  .scan-row .act { font-weight: 600; color: #555; }
-  .scan-row .time { margin-left: auto; color: #777; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .scan-row .act { font-weight: 600; color: var(--text-muted); }
+  .scan-row .time { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; font-size: 13px; }
   .scan-row .flag { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--danger-bg); color: var(--danger); font-weight: 700; }
-  #emptyMsg { color: #777; padding: 24px 10px; text-align: center; font-size: 14px; }
+  #emptyMsg { color: var(--text-faint); padding: 24px 10px; text-align: center; font-size: 14px; }
 
   /* ---- Bottom bar ---- */
   #bottombar {
@@ -114,12 +230,31 @@
     background: var(--paper); border-top: 3px solid var(--border);
   }
   #scanCount { font-weight: 700; font-size: 15px; }
-  #scanCount small { display: block; font-weight: 400; color: #666; font-size: 11px; }
+  #scanCount small { display: block; font-weight: 400; color: var(--text-muted); font-size: 11px; }
+  #exportGroup { margin-left: auto; display: flex; gap: 8px; }
+  #shareBtn {
+    padding: 14px 16px; font-size: 15px; font-weight: 700;
+    border-radius: 10px; border: 2px solid var(--ink); background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  #shareBtn[hidden] { display: none; }
+  #shareBtn:active { opacity: 0.8; }
   #exportBtn {
-    margin-left: auto; padding: 14px 20px; font-size: 16px; font-weight: 700;
-    border-radius: 10px; border: none; background: var(--ink); color: #fff; cursor: pointer;
+    padding: 14px 20px; font-size: 16px; font-weight: 700;
+    border-radius: 10px; border: none; background: var(--ink); color: var(--paper); cursor: pointer;
   }
   #exportBtn:active { opacity: 0.8; }
+
+  /* ---- Toast (export confirmation) ---- */
+  .toast {
+    position: fixed; left: 50%; bottom: calc(78px + env(safe-area-inset-bottom));
+    transform: translateX(-50%); max-width: calc(100% - 32px);
+    background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 999px;
+    font-size: 13px; font-weight: 600; text-align: center;
+    box-shadow: 0 6px 20px var(--shadow); z-index: 60;
+    opacity: 0; transition: opacity 200ms ease;
+  }
+  .toast[hidden] { display: none; }
+  .toast.show { opacity: 1; }
 
   /* ---- Modal ---- */
   #modalRoot {
@@ -128,39 +263,56 @@
   }
   #modalRoot[hidden] { display: none; }
   .modal-card {
-    background: #fff; border-radius: 14px; padding: 20px; max-width: 380px; width: 100%;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    background: var(--surface); color: var(--ink); border-radius: 14px; padding: 20px; max-width: 380px; width: 100%;
+    max-height: 80vh; overflow-y: auto;
+    box-shadow: 0 10px 40px var(--shadow);
   }
   .modal-card h3 { margin: 0 0 8px; font-size: 18px; }
-  .modal-card p { margin: 0 0 16px; font-size: 15px; color: #333; line-height: 1.4; }
+  .modal-card p { margin: 0 0 16px; font-size: 15px; color: var(--ink); line-height: 1.4; }
   .modal-card input[type="text"] {
     width: 100%; padding: 12px; font-size: 16px; border: 2px solid var(--border);
-    border-radius: 8px; margin-bottom: 14px;
+    border-radius: 8px; margin-bottom: 14px; background: var(--paper); color: var(--ink);
   }
-  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
   .modal-actions button {
     padding: 12px 18px; font-size: 15px; font-weight: 700; border-radius: 8px; border: none; cursor: pointer;
   }
-  .btn-secondary { background: #eee; color: #333; }
-  .btn-primary { background: var(--ink); color: #fff; }
-  .btn-danger { background: var(--danger); color: #fff; }
+  .modal-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary { background: var(--surface-alt); color: var(--ink); }
+  .btn-primary { background: var(--ink); color: var(--paper); }
+  .btn-danger { background: #b3261e; color: #fff; }
 
-  a.linklike { color: #333; text-decoration: underline; cursor: pointer; background: none; border: none; font: inherit; padding: 0; }
+  a.linklike { color: var(--ink); text-decoration: underline; cursor: pointer; background: none; border: none; font: inherit; padding: 0; }
 </style>
 </head>
 <body class="mode-delivery">
 
+  <div id="persistBanner" class="banner banner-warn" role="status" hidden>
+    <span>This phone isn't saving scans between reloads (private browsing or storage blocked) — export before closing this tab.</span>
+    <button type="button" id="persistBannerClose" aria-label="Dismiss">×</button>
+  </div>
+
+  <div id="onboardBanner" class="banner banner-info" hidden>
+    <span>New here? Tap <strong>?</strong> for a 30-second guide.</span>
+    <button type="button" id="onboardBannerClose" aria-label="Dismiss">×</button>
+  </div>
+
   <div id="topbar">
-    <div id="jobBanner"></div>
+    <div id="jobRow">
+      <select id="jobSelect" aria-label="Active job"></select>
+      <button id="addJobBtn" type="button">+ Job</button>
+    </div>
     <div id="modeToggle">
       <button class="mode-btn active" data-mode="DELIVERY" type="button">DELIVERY</button>
       <button class="mode-btn" data-mode="INSTALL" type="button">INSTALL</button>
     </div>
     <div id="statusRow">
-      <span>Register: <span id="registerPill" class="pill">none loaded</span></span>
-      <span>Device: <span id="devicePill" class="pill">not set</span></span>
+      <span>Register: <span id="registerPill" class="pill" aria-live="polite">none loaded</span></span>
+      <span>Device: <span id="devicePill" class="pill" aria-live="polite">not set</span></span>
       <button id="loadRegisterBtn" type="button">Load register CSV</button>
       <button id="setDeviceBtn" type="button">Set device</button>
+      <button id="themeToggleBtn" type="button">Dark</button>
+      <button id="helpBtn" type="button" aria-label="Help">?</button>
       <label style="display:flex; align-items:center; gap:4px;">
         <input type="checkbox" id="speakToggle"> speak
       </label>
@@ -175,20 +327,29 @@
   </div>
 
   <div id="listWrap">
-    <h2>Scans this session</h2>
+    <div id="listHeader">
+      <h2>All scans for this job</h2>
+      <span id="listSubtext"></span>
+      <button id="clearLogBtn" type="button" disabled>Clear log</button>
+    </div>
     <div id="scanList"></div>
     <div id="emptyMsg">No scans yet. Point the camera at a QR label.</div>
   </div>
 
   <div id="bottombar">
-    <div id="scanCount">0 scans<small id="scanCountToday">0 today</small></div>
-    <button id="exportBtn" type="button">Export CSV</button>
+    <div id="scanCount" aria-live="polite"><span id="scanCountMain">0 scans</span><small id="scanCountToday">0 today</small></div>
+    <div id="exportGroup">
+      <button id="shareBtn" type="button" hidden>Share…</button>
+      <button id="exportBtn" type="button">Export CSV</button>
+    </div>
   </div>
+
+  <div id="toast" class="toast" hidden></div>
 
   <input type="file" id="csvFileInput" accept=".csv,text/csv" hidden>
 
   <div id="modalRoot" hidden>
-    <div class="modal-card" id="modalCard"></div>
+    <div class="modal-card" id="modalCard" role="dialog" aria-modal="true"></div>
   </div>
 
 <!-- Vendored locally (no CDN) so the page keeps working offline once cached. -->
@@ -198,30 +359,58 @@
   "use strict";
 
   // ===========================================================================
-  //  Job identity - THE ONLY TWO LINES TO CHANGE when copying this whole
-  //  scan_page/ folder to set up a new job (a different site, different
-  //  register, different client). Everything below is scoped by JOB_ID so
-  //  that two jobs' pages can safely share a browser, or even a hosting
-  //  origin (e.g. two GitHub Pages project sites both live under the same
-  //  <you>.github.io origin - browser storage doesn't care about the URL
-  //  path, only the origin, so without this a phone that's opened both
-  //  jobs' links would see ONE shared register/scan log/cache between them).
-  //  Also update <title> above and the JOB_LABEL text shown in the header.
+  //  Job identity - a device can now hold multiple jobs (site/register/scan-
+  //  log sets) side by side and switch between them from the header, instead
+  //  of needing a whole separate deployed copy of this folder per job (the
+  //  old model - see DEPLOY.md if you're still doing that for a genuinely
+  //  separate client/origin). BOOTSTRAP_JOB_ID/LABEL are only the starting
+  //  job a fresh device sees, and the id any pre-multi-job data is migrated
+  //  under unchanged (see migrateLegacySingleJob() below) - nothing else in
+  //  this file reads them directly; everything else goes through whichever
+  //  job is currently active (`activeJobId` / `JK` below).
   // ===========================================================================
-  const JOB_ID = "NEL";                    // short, stable, no spaces - used in storage keys & export filenames
-  const JOB_LABEL = "NEL Tunnel — Mechanical";  // shown in the header so it's obvious which job this is
+  const BOOTSTRAP_JOB_ID = window.JOB_ID;
+  const BOOTSTRAP_JOB_LABEL = window.JOB_LABEL;
+
+  // Same charset the desktop GUI's own multi-job feature validates a job id
+  // against (it becomes a `jobs/<id>/` folder name there) - kept identical
+  // so a web-side job id stays safe to reuse as a desktop job id later, and
+  // vice versa: starts with a letter/number, then letters/numbers/-/_, up to
+  // 32 chars. Here it ends up as a localStorage-key segment and a CSV-
+  // filename segment, so the restriction is about safety, not naming style.
+  const JOB_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 
   // ===========================================================================
   //  Storage helpers - every localStorage access is wrapped, per the brief.
   //  A private-browsing tab or a browser blocking site data must not crash
-  //  the page; it just won't remember anything between reloads.
+  //  the page; it just won't remember anything between reloads. persistOrWarn()
+  //  additionally surfaces that failure to the user via a banner (previously
+  //  this only reached the console, which nobody in the field ever sees).
   // ===========================================================================
-  const LS_KEYS = {
-    register: `qrtrack.${JOB_ID}.register.v1`,
-    device: `qrtrack.${JOB_ID}.device.v1`,
-    scans: `qrtrack.${JOB_ID}.scanlog.v1`,
-    speak: `qrtrack.${JOB_ID}.speak.v1`,
+  // Global: shared across every job on this device, not re-scoped on a job
+  // switch - these describe the PHONE (which one it is, its UI preferences),
+  // not the job, so there's exactly one of each regardless of how many jobs
+  // exist.
+  const GLOBAL_KEYS = {
+    jobs: "qrtrack.jobList.v1",           // [{id, label}, ...]
+    activeJob: "qrtrack.activeJobId.v1",
+    device: "qrtrack.device.v1",
+    speak: "qrtrack.speak.v1",
+    theme: "qrtrack.theme.v1",
+    onboarded: "qrtrack.onboarded.v1",
   };
+  // Per-job: re-read/re-written on every switchJob() call below. Same shape
+  // as the original single-job keys, just parameterized by whichever job id
+  // is active instead of a hardcoded constant - so an existing device's data
+  // under qrtrack.<BOOTSTRAP_JOB_ID>.* keeps working unmodified once that id
+  // becomes (and stays) the first entry in the job list.
+  function jobKeys(jobId) {
+    return {
+      register: `qrtrack.${jobId}.register.v1`,
+      scans: `qrtrack.${jobId}.scanlog.v1`,
+      mode: `qrtrack.${jobId}.mode.v1`,
+    };
+  }
 
   function lsGet(key, fallback) {
     try {
@@ -241,18 +430,107 @@
       return false;
     }
   }
+  function showPersistBanner() {
+    const b = document.getElementById("persistBanner");
+    if (b) b.hidden = false;
+  }
+  function persistOrWarn(key, value) {
+    if (!lsSet(key, value)) showPersistBanner();
+  }
+
+  // One-time migration from the pre-multi-job version: device/speak/theme/
+  // onboarded used to be per-job (qrtrack.<BOOTSTRAP_JOB_ID>.xxx.v1) simply
+  // because there was only ever one job per deployed page. They're global
+  // now, so pull any existing value forward into its new shared key - but
+  // only if that key doesn't already exist, so this is a true no-op after
+  // the first run. register/scanlog/mode need no equivalent step: they keep
+  // the exact same qrtrack.<jobId>.xxx.v1 shape, just addressed through JK
+  // (below) instead of a hardcoded constant.
+  function migrateLegacySingleJob() {
+    for (const [globalKey, suffix] of [
+      [GLOBAL_KEYS.device, "device.v1"],
+      [GLOBAL_KEYS.speak, "speak.v1"],
+      [GLOBAL_KEYS.theme, "theme.v1"],
+      [GLOBAL_KEYS.onboarded, "onboarded.v1"],
+    ]) {
+      try {
+        if (localStorage.getItem(globalKey) !== null) continue;
+        const legacyRaw = localStorage.getItem(`qrtrack.${BOOTSTRAP_JOB_ID}.${suffix}`);
+        if (legacyRaw !== null) localStorage.setItem(globalKey, legacyRaw);
+      } catch (e) { /* storage unavailable - nothing to migrate into anyway */ }
+    }
+  }
+
+  // First run of the multi-job version (or a corrupt/cleared list): seed it
+  // with this deployment's original single job, so existing data under
+  // qrtrack.<BOOTSTRAP_JOB_ID>.* is picked straight up with zero migration.
+  function loadJobList() {
+    const stored = lsGet(GLOBAL_KEYS.jobs, null);
+    if (Array.isArray(stored) && stored.length) return stored;
+    const seeded = [{ id: BOOTSTRAP_JOB_ID, label: BOOTSTRAP_JOB_LABEL }];
+    persistOrWarn(GLOBAL_KEYS.jobs, seeded);
+    return seeded;
+  }
+
+  function buildRegisterIndex(items) {
+    // First-match-wins, same semantics as the old Array.find() version, but
+    // O(1) per lookup instead of O(n) - matters once a register or scan log
+    // grows into the thousands over a multi-week job. Also counts duplicate
+    // TagIDs so callers can surface that instead of it being console-only.
+    const idx = new Map();
+    let duplicates = 0;
+    for (const r of items) {
+      if (idx.has(r.TagID)) {
+        duplicates++;
+        console.warn(`Register CSV has a duplicate TagID '${r.TagID}' - only the first row for it will ever be matched.`);
+        continue;
+      }
+      idx.set(r.TagID, r);
+    }
+    return { idx, duplicates };
+  }
+
+  function scanKey(tagId, action) { return tagId + "|" + action; }
+
+  function buildScanIndex(log) {
+    // scanLog is newest-first (unshift). Iterate in that order and keep only
+    // the first (= newest) entry per TagID+action key, matching what the old
+    // scanLog.find(...) returned.
+    const idx = new Map();
+    for (const s of log) {
+      const key = scanKey(s.TagID, s.action);
+      if (!idx.has(key)) idx.set(key, s);
+    }
+    return idx;
+  }
 
   // ===========================================================================
   //  State
   // ===========================================================================
-  let register = lsGet(LS_KEYS.register, null);      // { items: [...], loadedAt } or null
-  let deviceName = lsGet(LS_KEYS.device, null);       // string or null
-  let scanLog = lsGet(LS_KEYS.scans, []);             // [{TagID, timestamp, action, device}]
-  let speakEnabled = lsGet(LS_KEYS.speak, false);
-  let mode = "DELIVERY";                              // never persisted across reloads on purpose -
-                                                        // always start a fresh scan session in DELIVERY
-                                                        // so the toggle is a deliberate, visible choice
-                                                        // each time the app is opened, not inferred state.
+  migrateLegacySingleJob();
+  let jobs = loadJobList();                           // [{id, label}, ...], display order
+  let activeJobId = lsGet(GLOBAL_KEYS.activeJob, null);
+  if (!activeJobId || !jobs.some((j) => j.id === activeJobId)) {
+    activeJobId = jobs[0].id;
+    persistOrWarn(GLOBAL_KEYS.activeJob, activeJobId);
+  }
+  let JK = jobKeys(activeJobId);                       // this job's register/scans/mode keys
+
+  let register = lsGet(JK.register, null);            // { items: [...], loadedAt } or null
+  // Array.isArray guard, not just a truthiness check on `register`: this runs at
+  // module init, so a stored value from an older/corrupt shape would otherwise
+  // throw here and brick the whole page on every reload, with no way to recover
+  // from a phone. Falling back to "no register" just means tags aren't flagged.
+  let registerIndex = register && Array.isArray(register.items)
+    ? buildRegisterIndex(register.items).idx                                    // TagID -> row
+    : null;
+  let deviceName = lsGet(GLOBAL_KEYS.device, null);    // string or null - shared across every job
+  let scanLog = lsGet(JK.scans, []);                   // [{TagID, timestamp, action, device}], newest first
+  let scanIndex = buildScanIndex(scanLog);             // "TagID|ACTION" -> newest matching entry
+  let speakEnabled = lsGet(GLOBAL_KEYS.speak, false);
+  let mode = "DELIVERY";                              // default for a first-ever visit; see the mode-resume
+                                                        // prompt in Init below for returning-visitor behavior
+  let exportedThisSession = false;                    // gates Clear log - see clearLogBtn wiring
   const lastSeenAt = new Map();                        // TagID -> ms timestamp, for the 3s debounce
   const DEBOUNCE_MS = 3000;
 
@@ -284,6 +562,19 @@
   function melbourneDateOnly(date) {
     return new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Melbourne" }).format(date || new Date());
   }
+  // Time-only, for on-screen display. Deliberately Melbourne-local like the
+  // export data (melbourneIso() above) rather than the device's own local
+  // time - on a phone whose clock/timezone isn't set to Melbourne, those two
+  // used to disagree with what actually ends up in the exported CSV.
+  // The formatter is built once, not per call: renderScanList() formats up to
+  // 200 rows on every single scan, and constructing an Intl.DateTimeFormat is
+  // by far the most expensive part of that loop.
+  const MELBOURNE_TIME_FMT = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Melbourne", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+  function melbourneTimeOnly(date) {
+    return MELBOURNE_TIME_FMT.format(date);
+  }
 
   // ===========================================================================
   //  Modal system (custom, not native alert/confirm/prompt - those block the
@@ -291,8 +582,13 @@
   // ===========================================================================
   const modalRoot = document.getElementById("modalRoot");
   const modalCard = document.getElementById("modalCard");
+  let onModalEscape = null;   // set by whichever modal is currently open, so Escape does the same thing as its Cancel
 
-  function closeModal() { modalRoot.hidden = true; modalCard.innerHTML = ""; }
+  function closeModal() { modalRoot.hidden = true; modalCard.innerHTML = ""; onModalEscape = null; }
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !modalRoot.hidden && onModalEscape) onModalEscape();
+  });
 
   function showConfirm({ title, message, confirmLabel, cancelLabel, danger }) {
     return new Promise((resolve) => {
@@ -304,8 +600,11 @@
           <button type="button" class="${danger ? "btn-danger" : "btn-primary"}" id="modalConfirm">${escapeHtml(confirmLabel || "OK")}</button>
         </div>`;
       modalRoot.hidden = false;
-      document.getElementById("modalCancel").onclick = () => { closeModal(); resolve(false); };
+      const cancel = () => { closeModal(); resolve(false); };
+      document.getElementById("modalCancel").onclick = cancel;
       document.getElementById("modalConfirm").onclick = () => { closeModal(); resolve(true); };
+      onModalEscape = cancel;
+      document.getElementById("modalConfirm").focus();
     });
   }
 
@@ -327,9 +626,111 @@
         closeModal();
         resolve(v || null);
       };
-      document.getElementById("modalCancel").onclick = () => { closeModal(); resolve(null); };
+      const cancel = () => { closeModal(); resolve(null); };
+      document.getElementById("modalCancel").onclick = cancel;
       document.getElementById("modalConfirm").onclick = save;
       input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") save(); });
+      onModalEscape = cancel;
+    });
+  }
+
+  // Typed-word confirmation for destructive actions, matching this project's
+  // own established "type YES" pattern for anything that can't be undone
+  // (e.g. the desktop GUI's Reset workbook). Confirm stays disabled until the
+  // typed text matches exactly.
+  function showTypedConfirm({ title, message, confirmWord, confirmLabel, cancelLabel }) {
+    return new Promise((resolve) => {
+      modalCard.innerHTML = `
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(message)}</p>
+        <input type="text" id="typedInput" placeholder="Type ${escapeHtml(confirmWord)} to confirm" autocomplete="off" autocapitalize="characters">
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="modalCancel">${escapeHtml(cancelLabel || "Cancel")}</button>
+          <button type="button" class="btn-danger" id="modalConfirm" disabled>${escapeHtml(confirmLabel || "Confirm")}</button>
+        </div>`;
+      modalRoot.hidden = false;
+      const input = document.getElementById("typedInput");
+      const confirmBtn = document.getElementById("modalConfirm");
+      input.addEventListener("input", () => { confirmBtn.disabled = input.value !== confirmWord; });
+      input.focus();
+      const cancel = () => { closeModal(); resolve(false); };
+      document.getElementById("modalCancel").onclick = cancel;
+      confirmBtn.onclick = () => { if (input.value === confirmWord) { closeModal(); resolve(true); } };
+      onModalEscape = cancel;
+    });
+  }
+
+  // Static help/reference card - not a promise-driven flow like the others
+  // above, just an informational modal with a single Close button. Doubles
+  // as the answer to "what does this button do" for a first-time user, since
+  // there's nowhere else in the deployed app to put that (docs/ lives in the
+  // private pipeline repo, unreachable from a phone).
+  function showHelp() {
+    modalCard.innerHTML = `
+      <h3>Quick guide</h3>
+      <p><strong>Job selector</strong> (top) — switch which job's register and scan log you're working with, or tap <strong>+ Job</strong> to add a new one. Device name, theme, and Speak stay the same across every job - only the register and scan log switch.</p>
+      <p><strong>DELIVERY / INSTALL</strong> — sets what a scan logs. Every tag scanned while a mode is active is logged with that action automatically, no extra tap needed.</p>
+      <p><strong>Set device</strong> — names this phone so scans show which device made them (also shown in the exported filename).</p>
+      <p><strong>Load register CSV</strong> — only needed if the asset list didn't load automatically. It's used to flag tags that aren't on the list, not to block scanning.</p>
+      <p><strong>Register / Device</strong> pills — show whether the tag list and device name are ready.</p>
+      <p><strong>Export CSV</strong> — downloads every scan recorded for the current job. Safe to export more than once - nothing is lost by re-exporting.</p>
+      <p><strong>Share</strong> — where supported, sends the exported file straight to another app (Teams, email, etc.) instead of only downloading it.</p>
+      <p><strong>Clear log</strong> — permanently deletes every scan for the current job. Only available after exporting at least once this session.</p>
+      <p><strong>Dark / Light</strong> — switches the colour theme. Defaults to light.</p>
+      <p>Using Binary Eye instead of this app? Its printed <strong>#MODE:</strong> marker codes do the same job as the DELIVERY/INSTALL buttons above — you only need one or the other, not both.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn-primary" id="modalConfirm">Close</button>
+      </div>`;
+    modalRoot.hidden = false;
+    const close = () => { closeModal(); markOnboarded(); };
+    document.getElementById("modalConfirm").onclick = close;
+    onModalEscape = close;
+    document.getElementById("modalConfirm").focus();
+  }
+
+  // Job id validated live (Create stays disabled until it's both well-formed
+  // and not already in use) rather than failing after the fact - this is the
+  // one modal flow here that isn't a fixed-choice confirm/prompt.
+  function showAddJobPrompt() {
+    return new Promise((resolve) => {
+      modalCard.innerHTML = `
+        <h3>New job</h3>
+        <p>Job ID: letters/numbers/-/_ only, starting with a letter or number, up to 32 characters. It's stamped into every exported filename, so keep it short - e.g. <strong>SITE2</strong>.</p>
+        <input type="text" id="jobIdInput" placeholder="e.g. SITE2" autocomplete="off" autocapitalize="characters">
+        <input type="text" id="jobLabelInput" placeholder="Display name (optional)">
+        <p id="jobIdError" style="color:var(--danger); font-size:13px; margin:-8px 0 14px; display:none;"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="modalCancel">Cancel</button>
+          <button type="button" class="btn-primary" id="modalConfirm" disabled>Create</button>
+        </div>`;
+      modalRoot.hidden = false;
+      const idInput = document.getElementById("jobIdInput");
+      const labelInput = document.getElementById("jobLabelInput");
+      const errEl = document.getElementById("jobIdError");
+      const confirmBtn = document.getElementById("modalConfirm");
+
+      function validate() {
+        const id = idInput.value.trim();
+        let msg = "";
+        if (id && !JOB_ID_RE.test(id)) msg = "Letters, numbers, - and _ only, starting with a letter or number.";
+        else if (id && jobs.some((j) => j.id.toLowerCase() === id.toLowerCase())) msg = "A job with this ID already exists.";
+        errEl.textContent = msg;
+        errEl.style.display = msg ? "block" : "none";
+        confirmBtn.disabled = !id || !!msg;
+      }
+      idInput.addEventListener("input", validate);
+      idInput.focus();
+
+      const cancel = () => { closeModal(); resolve(null); };
+      document.getElementById("modalCancel").onclick = cancel;
+      confirmBtn.onclick = () => {
+        const id = idInput.value.trim();
+        if (!id || !JOB_ID_RE.test(id) || jobs.some((j) => j.id.toLowerCase() === id.toLowerCase())) return;
+        const label = labelInput.value.trim() || id;
+        closeModal();
+        resolve({ id, label });
+      };
+      onModalEscape = cancel;
     });
   }
 
@@ -348,6 +749,36 @@
     return String(s).replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
+  }
+
+  // ===========================================================================
+  //  Onboarding: a single dismissible first-run banner (not a blocking
+  //  walkthrough - that would fight the existing non-blocking camera-start
+  //  pattern used for register auto-load/device prompt below). Dismissing it
+  //  or opening Help both mark it seen so it never reappears on this device.
+  // ===========================================================================
+  function markOnboarded() {
+    const b = document.getElementById("onboardBanner");
+    if (b) b.hidden = true;
+    persistOrWarn(GLOBAL_KEYS.onboarded, true);
+  }
+
+  // ===========================================================================
+  //  Theme: defaults to light on a fresh device regardless of OS preference -
+  //  this is a deliberate, remembered user choice, not an auto-detected one.
+  //  (The FOUC-avoiding early read of this same key lives in the <head>
+  //  script - this is the version wired to the toggle button + persistence.)
+  // ===========================================================================
+  let theme = lsGet(GLOBAL_KEYS.theme, "light");
+  function applyTheme(t) {
+    theme = t === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", theme);
+    const btn = document.getElementById("themeToggleBtn");
+    if (btn) btn.textContent = theme === "dark" ? "Light" : "Dark";
+  }
+  function toggleTheme() {
+    applyTheme(theme === "dark" ? "light" : "dark");
+    persistOrWarn(GLOBAL_KEYS.theme, theme);
   }
 
   // ===========================================================================
@@ -394,41 +825,47 @@
     // duplicate TagIDs, but this auto-load path can also be fed a hand-
     // edited or different-job CSV directly - don't hard-fail here (that
     // would silently break the zero-tap auto-load for everything, not just
-    // the duplicate), but don't stay silent either. findInRegister() below
-    // uses first-match, so a duplicate just means the later row is unreachable.
-    const seen = new Set();
-    for (const r of items) {
-      if (seen.has(r.TagID)) {
-        console.warn(`Register CSV has a duplicate TagID '${r.TagID}' - only the first row for it will ever be matched.`);
-      }
-      seen.add(r.TagID);
-    }
+    // the duplicate). The caller decides whether/how to surface `duplicates`
+    // (silent on the automatic first-load path, shown to the user on a
+    // manual "Load register CSV").
+    const { idx, duplicates } = buildRegisterIndex(items);
     register = { items, loadedAt: Date.now() };
-    lsSet(LS_KEYS.register, register);
+    registerIndex = idx;
+    persistOrWarn(JK.register, register);
     renderStatus();
+    return { count: items.length, duplicates };
   }
 
   function findInRegister(tagId) {
-    if (!register) return null;
-    return register.items.find((r) => r.TagID === tagId) || null;
+    if (!registerIndex) return null;
+    return registerIndex.get(tagId) || null;
   }
 
   // ===========================================================================
   //  Scan log
   // ===========================================================================
-  function saveScanLog() { lsSet(LS_KEYS.scans, scanLog); }
+  function saveScanLog() { persistOrWarn(JK.scans, scanLog); }
 
   function alreadyLoggedSameAction(tagId, action) {
-    return scanLog.find((s) => s.TagID === tagId && s.action === action) || null;
+    return scanIndex.get(scanKey(tagId, action)) || null;
   }
 
   async function recordScan(tagId, action) {
     const entry = { TagID: tagId, timestamp: melbourneIso(), action, device: deviceName || "UNKNOWN_DEVICE" };
     scanLog.unshift(entry);
+    scanIndex.set(scanKey(tagId, action), entry);   // this entry is always the newest for its key
     saveScanLog();
     renderScanList();
     renderCounts();
     return entry;
+  }
+
+  function clearScanLog() {
+    scanLog = [];
+    scanIndex.clear();
+    saveScanLog();
+    renderScanList();
+    renderCounts();
   }
 
   // ===========================================================================
@@ -480,6 +917,8 @@
     // arrives mid-modal would still update lastSeenAt and silently push the
     // debounce window further out, so a deliberate re-scan right after the
     // user dismisses the modal could get swallowed with no feedback at all.
+    // The same flag is set during the mode-resume prompt at startup and a job
+    // switch, for the same reason.
     if (processing) return;
 
     const now = Date.now();
@@ -491,8 +930,13 @@
     try {
       const action = mode === "DELIVERY" ? "DELIVERED" : "INSTALLED";
 
+      // Only prompt when a register is actually loaded to judge against - a
+      // job with none (every freshly-created job, until someone loads a CSV)
+      // can't tell "unknown" from "no data to check", so it shouldn't flag
+      // every single scan. Matches the same distinction renderScanList()
+      // already makes for the "not in register" list flag.
       const known = findInRegister(tagId);
-      if (!known) {
+      if (register && !known) {
         const proceed = await showConfirm({
           title: "Unknown tag",
           message: `"${tagId}" is not in the loaded register. Log it anyway? (It will show up in the exception report.)`,
@@ -505,10 +949,10 @@
 
       const dup = alreadyLoggedSameAction(tagId, action);
       if (dup) {
-        const dupTime = new Date(dup.timestamp).toLocaleTimeString();
+        const dupTime = melbourneTimeOnly(new Date(dup.timestamp));
         const proceed = await showConfirm({
           title: "Already scanned",
-          message: `"${tagId}" was already logged as ${action} at ${dupTime} (this device or an earlier export). Log it again?`,
+          message: `"${tagId}" was already logged as ${action} at ${dupTime} on this phone. This does not check other phones — if two people are scanning the same tags, check with the team.`,
           confirmLabel: "Log again",
           cancelLabel: "Skip",
         });
@@ -535,6 +979,30 @@
   let barcodeDetector = null;
   let scanTimer = null;
 
+  // All overlay writes go through this so a message can optionally include a
+  // Retry button without every call site having to build that markup itself,
+  // and so a later message always fully replaces an earlier one (button
+  // included) rather than leaving stale content behind.
+  function setOverlayMessage(message, opts) {
+    opts = opts || {};
+    overlay.innerHTML = "";
+    const msgEl = document.createElement("div");
+    msgEl.textContent = message;
+    overlay.appendChild(msgEl);
+    if (opts.retry) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "overlay-btn";
+      btn.textContent = "Retry";
+      btn.addEventListener("click", () => {
+        setOverlayMessage("Starting camera…");
+        startCamera();
+      });
+      overlay.appendChild(btn);
+    }
+    overlay.classList.remove("hidden");
+  }
+
   async function setUpDetector() {
     if ("BarcodeDetector" in window) {
       try {
@@ -546,8 +1014,7 @@
       } catch (e) { /* fall through to jsQR */ }
     }
     if (!window.jsQR) {
-      overlay.textContent = "QR decoder failed to load (jsQR.js missing). Camera scanning unavailable.";
-      overlay.classList.remove("hidden");
+      setOverlayMessage("QR decoder failed to load (jsQR.js missing). Camera scanning unavailable.");
       return null;
     }
     return "jsQR fallback";
@@ -557,8 +1024,7 @@
 
   async function startCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      overlay.textContent = "This browser has no camera API. Open this page over HTTPS (or localhost) in Chrome.";
-      overlay.classList.remove("hidden");
+      setOverlayMessage("This browser has no camera API. Open this page over HTTPS (or localhost) in Chrome.");
       return;
     }
     try {
@@ -579,10 +1045,13 @@
       video.srcObject = stream;
       await video.play();
       overlay.classList.add("hidden");
+      sizeScanFrame();
     } catch (e) {
-      overlay.textContent = "Camera access failed: " + (e && e.message ? e.message : e) +
-        ". On a phone, this page must be served over HTTPS (or via the insecure-origin flag for testing).";
-      overlay.classList.remove("hidden");
+      setOverlayMessage(
+        "Camera access failed: " + (e && e.message ? e.message : e) +
+        ". On a phone, this page must be served over HTTPS (or via the insecure-origin flag for testing).",
+        { retry: true }
+      );
       return;
     }
 
@@ -616,6 +1085,73 @@
                                              // meaningfully change battery/CPU load in practice.
   }
 
+  // Keeps the on-screen "aim here" frame an actual square regardless of the
+  // phone's screen shape. #cameraWrap isn't square (aspect-ratio 3/4, further
+  // clamped by max-height: 46vh), so a CSS-only percentage inset can't
+  // guarantee squareness - this measures the container's real rendered box
+  // and sets an explicit pixel width/height instead. The camera overlay
+  // covers the whole area during startup, so the brief pre-layout moment
+  // this runs in is never actually visible.
+  function sizeScanFrame() {
+    const wrap = document.getElementById("cameraWrap");
+    const frame = document.getElementById("scanFrame");
+    if (!wrap || !frame) return;
+    const rect = wrap.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;   // not laid out yet - the resize listener will retry
+    const side = Math.round(0.76 * Math.min(rect.width, rect.height));
+    frame.style.width = side + "px";
+    frame.style.height = side + "px";
+  }
+  window.addEventListener("resize", sizeScanFrame);
+  window.addEventListener("orientationchange", sizeScanFrame);
+
+  // ===========================================================================
+  //  Jobs: switching + the header selector
+  // ===========================================================================
+  function updateDocumentTitle() {
+    const job = jobs.find((j) => j.id === activeJobId);
+    document.title = (job ? job.label : activeJobId) + " — QR Asset Scanner";
+  }
+
+  function renderJobSelect() {
+    const sel = document.getElementById("jobSelect");
+    if (!sel) return;
+    sel.innerHTML = jobs.map((j) =>
+      `<option value="${escapeHtml(j.id)}"${j.id === activeJobId ? " selected" : ""}>${escapeHtml(j.label)}</option>`
+    ).join("");
+  }
+
+  // Re-points every per-job piece of state (register, scan log + its index,
+  // mode) at the new job's storage keys and re-renders. Device name/speak/
+  // theme/onboarded are global (see GLOBAL_KEYS above) and are deliberately
+  // untouched by a switch.
+  function switchJob(jobId) {
+    if (jobId === activeJobId || !jobs.some((j) => j.id === jobId)) return;
+    activeJobId = jobId;
+    JK = jobKeys(activeJobId);
+    persistOrWarn(GLOBAL_KEYS.activeJob, activeJobId);
+
+    register = lsGet(JK.register, null);
+    registerIndex = register && Array.isArray(register.items) ? buildRegisterIndex(register.items).idx : null;
+    scanLog = lsGet(JK.scans, []);
+    scanIndex = buildScanIndex(scanLog);
+    // Silent, unlike the startup resume-confirm prompt below: switching jobs
+    // is already a deliberate action, and the mode toggle's colour makes the
+    // newly-active job's mode immediately visible - a second confirmation on
+    // top of that would just be nagging.
+    setMode(lsGet(JK.mode, "DELIVERY"));
+
+    exportedThisSession = false;   // Clear log's gate doesn't carry across a switch
+    setClearLogEnabled(false);
+    lastSeenAt.clear();            // a tag debounced under the old job shouldn't suppress it under the new one
+
+    renderJobSelect();
+    renderStatus();
+    renderCounts();
+    renderScanList();
+    updateDocumentTitle();
+  }
+
   // ===========================================================================
   //  Rendering
   // ===========================================================================
@@ -633,11 +1169,21 @@
     else { dpill.textContent = "not set"; dpill.classList.add("warn"); }
   }
 
+  function renderListSubtext() {
+    const el = document.getElementById("listSubtext");
+    if (!el) return;
+    if (!scanLog.length) { el.textContent = ""; return; }
+    const oldest = scanLog[scanLog.length - 1];   // newest-first array, so the last entry is the oldest
+    const since = (oldest.timestamp || "").slice(0, 10);
+    el.textContent = `${scanLog.length} total, since ${since}`;
+  }
+
   function renderCounts() {
-    document.getElementById("scanCount").firstChild.textContent = `${scanLog.length} scans`;
+    document.getElementById("scanCountMain").textContent = `${scanLog.length} scans`;
     const today = melbourneDateOnly();
     const todayCount = scanLog.filter((s) => (s.timestamp || "").slice(0, 10) === today).length;
     document.getElementById("scanCountToday").textContent = `${todayCount} today`;
+    renderListSubtext();
   }
 
   function renderScanList() {
@@ -646,7 +1192,7 @@
     if (!scanLog.length) { listEl.innerHTML = ""; emptyEl.style.display = "block"; return; }
     emptyEl.style.display = "none";
     listEl.innerHTML = scanLog.slice(0, 200).map((s) => {
-      const time = new Date(s.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const time = melbourneTimeOnly(new Date(s.timestamp));
       const unknown = register && !findInRegister(s.TagID);
       return `<div class="scan-row action-${escapeHtml(s.action)}">
         <span class="tag">${escapeHtml(s.TagID)}</span>
@@ -657,11 +1203,30 @@
     }).join("");
   }
 
+  // Both timers are tracked and cleared: without clearing the inner one, a
+  // second toast raised during the previous toast's 220ms fade-out would be
+  // hidden again by that stale timeout the moment it appeared.
+  let toastFadeTimer = null;
+  let toastHideTimer = null;
+  function showToast(message) {
+    const el = document.getElementById("toast");
+    clearTimeout(toastFadeTimer);
+    clearTimeout(toastHideTimer);
+    el.textContent = message;
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add("show"));
+    toastFadeTimer = setTimeout(() => {
+      el.classList.remove("show");
+      toastHideTimer = setTimeout(() => { el.hidden = true; }, 220);
+    }, 2600);
+  }
+
   // ===========================================================================
   //  CSV export - dumps the full local scan log every time (append-only event
   //  log semantics: merge_scans.py's earliest-wins logic makes re-exports and
   //  overlapping exports safe, so this never risks silently dropping a day's
-  //  scans if someone forgets to export daily).
+  //  scans if someone forgets to export daily). Shared by both the download
+  //  button and the Share button below.
   // ===========================================================================
   function scansToCsv(rows) {
     const header = "TagID,timestamp,action,device";
@@ -673,43 +1238,106 @@
     return [header].concat(lines).join("\r\n") + "\r\n";
   }
 
-  async function doExport() {
+  async function ensureReadyToExport() {
     if (!deviceName) {
       const name = await showDeviceNamePrompt("");
-      if (!name) return;
+      if (!name) return false;
       deviceName = name;
-      lsSet(LS_KEYS.device, deviceName);
+      persistOrWarn(GLOBAL_KEYS.device, deviceName);
       renderStatus();
     }
     if (!scanLog.length) {
-      await showConfirm({ title: "Nothing to export", message: "No scans recorded yet on this device.", confirmLabel: "OK", cancelLabel: "OK" });
-      return;
+      await showConfirm({ title: "Nothing to export", message: "No scans recorded yet for this job.", confirmLabel: "OK", cancelLabel: "OK" });
+      return false;
     }
+    return true;
+  }
+
+  function buildExportFile() {
     const csv = scansToCsv(scanLog.slice().reverse());   // chronological order in the file
-    // Job in the filename is a belt-and-suspenders safety net, not the
-    // thing that actually routes data - each job's scans/ folder only ever
-    // gets that job's own exports (see JOB_ID note above). But if two jobs'
-    // CSVs ever end up in the same inbox/email thread before being sorted,
-    // the filename alone should make it obvious which is which.
-    const filename = `scans_${JOB_ID}_${deviceName}_${melbourneDateOnly()}.csv`;
+    // The active job's id in the filename is what a desktop-side
+    // merge_scans.py --job-id check (soft, non-blocking) compares against -
+    // keep stamping whichever job was active when Export/Share was tapped.
+    const filename = `scans_${activeJobId}_${deviceName}_${melbourneDateOnly()}.csv`;
+    return { csv, filename };
+  }
+
+  // Single owner of the Clear log button's enabled state + tooltip, so the
+  // "why is this greyed out" wording can't drift between the enable and the
+  // disable path (it's also called once at Init and on every job switch to
+  // set the initial state).
+  function setClearLogEnabled(enabled) {
+    const btn = document.getElementById("clearLogBtn");
+    if (!btn) return;
+    btn.disabled = !enabled;
+    btn.title = enabled ? "Clear all scans for this job" : "Export at least once this session to enable";
+  }
+
+  function markExported() {
+    exportedThisSession = true;
+    setClearLogEnabled(true);
+  }
+
+  async function doExport() {
+    if (!(await ensureReadyToExport())) return;
+    const { csv, filename } = buildExportFile();
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+    showToast(`Exported ${scanLog.length} scans to ${filename}.`);
+    markExported();
+  }
+
+  // Additive alongside the plain download above, never instead of it - only
+  // shown when the browser can actually share a File (desktop Chrome and
+  // some Android WebViews can't), so the manual download path always stays
+  // available as a fallback.
+  async function doShare() {
+    if (!(await ensureReadyToExport())) return;
+    const { csv, filename } = buildExportFile();
+    const file = new File([csv], filename, { type: "text/csv" });
+    try {
+      await navigator.share({ files: [file], title: filename });
+      markExported();
+    } catch (e) {
+      if (e && e.name !== "AbortError") {   // AbortError = user cancelled the share sheet, not a real failure
+        await showConfirm({
+          title: "Share failed",
+          message: (e && e.message ? e.message : String(e)) + " — you can still use Export CSV instead.",
+          confirmLabel: "OK", cancelLabel: "OK",
+        });
+      }
+    }
   }
 
   // ===========================================================================
   //  Wiring
   // ===========================================================================
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll(".mode-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
+    document.body.classList.toggle("mode-delivery", m === "DELIVERY");
+    document.body.classList.toggle("mode-install", m === "INSTALL");
+    persistOrWarn(JK.mode, m);
+  }
   document.querySelectorAll(".mode-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      mode = btn.dataset.mode;
-      document.querySelectorAll(".mode-btn").forEach((b) => b.classList.toggle("active", b === btn));
-      document.body.classList.toggle("mode-delivery", mode === "DELIVERY");
-      document.body.classList.toggle("mode-install", mode === "INSTALL");
-    });
+    btn.addEventListener("click", () => setMode(btn.dataset.mode));
+  });
+
+  document.getElementById("jobSelect").addEventListener("change", (ev) => {
+    if (processing) { renderJobSelect(); return; }   // revert - can't switch mid decode-confirm
+    switchJob(ev.target.value);
+  });
+  document.getElementById("addJobBtn").addEventListener("click", async () => {
+    if (processing) return;   // don't open a second modal over an in-flight decode-confirm
+    const created = await showAddJobPrompt();
+    if (!created) return;
+    jobs = jobs.concat([created]);
+    persistOrWarn(GLOBAL_KEYS.jobs, jobs);
+    switchJob(created.id);
   });
 
   document.getElementById("loadRegisterBtn").addEventListener("click", () => {
@@ -719,59 +1347,164 @@
     const file = ev.target.files[0];
     ev.target.value = "";
     if (!file) return;
+    // Gated by `processing` like every other modal in this file: this path now
+    // always ends in a modal (it used to only on the rare error), so without
+    // this a decode arriving mid-dialog would overwrite the card and orphan
+    // the await below.
+    processing = true;
     try {
       const text = await file.text();
-      loadRegisterFromCsvText(text);
+      const { count, duplicates } = loadRegisterFromCsvText(text);
+      const dupNote = duplicates
+        ? ` — ${duplicates} duplicate TagID${duplicates === 1 ? "" : "s"} found, only the first row of each was kept.`
+        : "";
+      await showConfirm({
+        title: "Register loaded",
+        message: `Loaded ${count} item${count === 1 ? "" : "s"}.${dupNote}`,
+        confirmLabel: "OK", cancelLabel: "OK",
+      });
     } catch (e) {
       await showConfirm({ title: "Couldn't load CSV", message: String(e.message || e), confirmLabel: "OK", cancelLabel: "OK" });
+    } finally {
+      processing = false;
     }
   });
 
   document.getElementById("setDeviceBtn").addEventListener("click", async () => {
     const name = await showDeviceNamePrompt(deviceName || "");
-    if (name) { deviceName = name; lsSet(LS_KEYS.device, deviceName); renderStatus(); }
+    if (name) { deviceName = name; persistOrWarn(GLOBAL_KEYS.device, deviceName); renderStatus(); }
   });
 
   document.getElementById("speakToggle").addEventListener("change", (ev) => {
     speakEnabled = ev.target.checked;
-    lsSet(LS_KEYS.speak, speakEnabled);
+    persistOrWarn(GLOBAL_KEYS.speak, speakEnabled);
+  });
+
+  document.getElementById("themeToggleBtn").addEventListener("click", toggleTheme);
+  document.getElementById("helpBtn").addEventListener("click", showHelp);
+
+  document.getElementById("persistBannerClose").addEventListener("click", () => {
+    document.getElementById("persistBanner").hidden = true;
+  });
+  document.getElementById("onboardBannerClose").addEventListener("click", markOnboarded);
+
+  document.getElementById("clearLogBtn").addEventListener("click", async () => {
+    if (!exportedThisSession) return;   // belt-and-suspenders - the button is also `disabled` until this is true
+    const ok = await showTypedConfirm({
+      title: "Clear log",
+      message: "This permanently deletes every scan recorded for this job. You've already exported this session, so that data is safely in the CSV - but this cannot be undone here.",
+      confirmWord: "YES",
+      confirmLabel: "Clear log",
+      cancelLabel: "Keep scans",
+    });
+    if (!ok) return;
+    clearScanLog();
+    exportedThisSession = false;
+    setClearLogEnabled(false);
   });
 
   document.getElementById("exportBtn").addEventListener("click", doExport);
+  document.getElementById("shareBtn").addEventListener("click", doShare);
 
   // ===========================================================================
   //  Init
   // ===========================================================================
-  document.getElementById("jobBanner").textContent = JOB_LABEL;
+  renderJobSelect();
+  updateDocumentTitle();
   document.getElementById("speakToggle").checked = !!speakEnabled;
+  applyTheme(theme);
+  setClearLogEnabled(exportedThisSession);
   renderStatus();
   renderCounts();
   renderScanList();
+  sizeScanFrame();
   startCamera();
+
+  if (!lsGet(GLOBAL_KEYS.onboarded, false)) {
+    document.getElementById("onboardBanner").hidden = false;
+  }
+
+  // Feature-detect the Web Share API for files. canShare() needs an actual
+  // File to test against - a throwaway one is fine, nothing is shared here.
+  (function checkShareSupport() {
+    let supported = false;
+    try {
+      if (navigator.canShare && navigator.share) {
+        const probe = new File(["x"], "probe.csv", { type: "text/csv" });
+        supported = navigator.canShare({ files: [probe] });
+      }
+    } catch (e) { supported = false; }
+    document.getElementById("shareBtn").hidden = !supported;
+  })();
 
   // First open on a phone that's never used this page before: try to load
   // trial_items.csv automatically from right next to index.html, so there's
-  // nothing to pick or hunt for - the register is just there. Silent no-op
-  // if it's missing (e.g. hosted without it) or unreachable (offline before
-  // the first successful load) - the manual "Load register CSV" button is
-  // still there as a fallback either way.
-  if (!register && "fetch" in window) {
+  // nothing to pick or hunt for - the register is just there. Only for the
+  // bootstrap job: a freshly-created job has no bundled register to auto-
+  // load, so it stays "none loaded" until someone uses "Load register CSV".
+  // Silent no-op if the file is missing (e.g. hosted without it) or
+  // unreachable (offline before the first successful load) either way - the
+  // manual button is always there as a fallback. (Deliberately silent even
+  // about duplicate TagIDs here - the manual load path is where that gets
+  // surfaced, since interrupting an automatic zero-tap bootstrap would
+  // defeat the point of it.)
+  if (!register && activeJobId === BOOTSTRAP_JOB_ID && "fetch" in window) {
+    const fetchJobId = activeJobId;   // captured now - see the check below
     fetch("trial_items.csv").then((r) => {
       if (!r.ok) throw new Error("no trial_items.csv alongside index.html");
       return r.text();
     }).then((text) => {
+      // This fetch has no `processing` gate (it's meant to be silent/non-
+      // blocking), so a job switch can finish before it resolves - without
+      // this check, a bootstrap-job register fetched slowly (or while
+      // offline, then retried) would land in whichever job is active by the
+      // time it comes back, not the one it was fetched for.
+      if (activeJobId !== fetchJobId) return;
       loadRegisterFromCsvText(text);
     }).catch((e) => console.warn("Auto-load of trial_items.csv skipped:", e.message || e));
   }
 
-  // Ask for the device name up front (non-blocking - camera starts either
-  // way) so real scans get tagged correctly from the first one, rather than
-  // only being asked the first time someone taps Export.
-  if (!deviceName) {
-    showDeviceNamePrompt("").then((name) => {
-      if (name) { deviceName = name; lsSet(LS_KEYS.device, deviceName); renderStatus(); }
-    });
-  }
+  // Both startup prompts share one modal card, so they must run one after the
+  // other - firing them in the same tick would let the second overwrite the
+  // first's markup and leave the first's promise permanently unsettled (in
+  // practice: the device-name prompt flashing up and vanishing unanswered).
+  // Still non-blocking overall: the camera starts regardless, above.
+  (async function runStartupPrompts() {
+    // Ask for the device name up front so real scans get tagged correctly from
+    // the first one, rather than only being asked the first time someone taps
+    // Export.
+    if (!deviceName) {
+      const name = await showDeviceNamePrompt("");
+      if (name) { deviceName = name; persistOrWarn(GLOBAL_KEYS.device, deviceName); renderStatus(); }
+    }
+
+    // Mode is deliberately NOT auto-resumed silently - a returning visitor
+    // whose last mode was INSTALL gets asked to confirm before any scan can be
+    // logged, so it stays a visible, deliberate choice rather than inferred
+    // state (this preserves the intent behind the original "always reset to
+    // DELIVERY" design, just letting the user pick up where they left off
+    // instead of always forcing DELIVERY). Gated by `processing` for the same
+    // reason as every other modal here - so a decode that arrives while this
+    // prompt is open is safely ignored rather than colliding with it. (This
+    // only runs once, for the job active at page load - switching jobs later
+    // applies that job's last mode without re-prompting, see switchJob().)
+    const persistedMode = lsGet(JK.mode, null);
+    if ((persistedMode === "DELIVERY" || persistedMode === "INSTALL") && persistedMode !== mode) {
+      const other = persistedMode === "DELIVERY" ? "INSTALL" : "DELIVERY";
+      processing = true;
+      try {
+        const keep = await showConfirm({
+          title: "Resume previous mode?",
+          message: `This phone was last left in ${persistedMode} mode. Continue in ${persistedMode}, or switch to ${other}?`,
+          confirmLabel: `Continue in ${persistedMode}`,
+          cancelLabel: `Switch to ${other}`,
+        });
+        setMode(keep ? persistedMode : other);
+      } finally {
+        processing = false;
+      }
+    }
+  })();
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW registration failed", e));
