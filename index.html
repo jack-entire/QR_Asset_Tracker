@@ -162,6 +162,16 @@
     background: var(--surface-alt); font-weight: 600;
   }
   .pill.warn { background: var(--danger-bg); color: var(--danger); }
+  /* #registerPill is a <button> (tap to browse/search the register), not a
+     plain status span - reset the button chrome so it still just looks like
+     a pill, and give it a real tap target (a plain status pill can afford to
+     be tiny; a control glove-tapped in the field can't - see the plan's
+     "no tap-target shrinkage" invariant). Selector needs to match #statusRow
+     button's specificity (an ID beats a bare class) to actually win. */
+  #statusRow button.pill {
+    border: none; font: inherit; cursor: pointer; -webkit-appearance: none; appearance: none;
+    padding: 8px 12px; min-height: 32px;
+  }
 
   /* ---- Camera ---- */
   #cameraWrap {
@@ -283,6 +293,25 @@
   .btn-danger { background: #b3261e; color: #fff; }
 
   a.linklike { color: var(--ink); text-decoration: underline; cursor: pointer; background: none; border: none; font: inherit; padding: 0; }
+
+  /* ---- Register browser (opened by tapping the register count pill) ---- */
+  .register-results { max-height: 50vh; overflow-y: auto; margin: 4px 0 14px; }
+  .register-row { padding: 8px 2px; border-bottom: 1px solid var(--border); }
+  .register-row:last-child { border-bottom: none; }
+  .register-row-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .register-tag { font-weight: 700; font-family: ui-monospace, Consolas, monospace; }
+  .register-row-desc { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+  .reg-badge { font-size: 11px; padding: 1px 6px; border-radius: 6px; font-weight: 700; }
+  .reg-badge-delivered { background: var(--delivery-bg); color: var(--delivery-color); }
+  .reg-badge-installed { background: var(--install-bg); color: var(--install-color); }
+  .register-empty, .register-truncated { color: var(--text-faint); font-size: 13px; text-align: center; padding: 10px 2px; }
+
+  /* ---- Scan list search ---- */
+  #scanSearchInput {
+    display: block; width: 100%; padding: 10px 12px; font-size: 14px;
+    border: 1px solid var(--border); border-radius: 8px; margin: 0 0 10px;
+    background: var(--surface); color: var(--ink);
+  }
 </style>
 </head>
 <body class="mode-delivery">
@@ -307,7 +336,7 @@
       <button class="mode-btn" data-mode="INSTALL" type="button">INSTALL</button>
     </div>
     <div id="statusRow">
-      <span>Register: <span id="registerPill" class="pill" aria-live="polite">none loaded</span></span>
+      <span>Register: <button type="button" id="registerPill" class="pill" aria-live="polite" title="Tap to view or search the register">none loaded</button></span>
       <span>Device: <span id="devicePill" class="pill" aria-live="polite">not set</span></span>
       <button id="loadRegisterBtn" type="button">Load register CSV</button>
       <button id="setDeviceBtn" type="button">Set device</button>
@@ -328,10 +357,11 @@
 
   <div id="listWrap">
     <div id="listHeader">
-      <h2>All scans for this job</h2>
+      <h2>All scans for this session</h2>
       <span id="listSubtext"></span>
       <button id="clearLogBtn" type="button" disabled>Clear log</button>
     </div>
+    <input type="text" id="scanSearchInput" placeholder="Search scans by tag ID…" autocomplete="off">
     <div id="scanList"></div>
     <div id="emptyMsg">No scans yet. Point the camera at a QR label.</div>
   </div>
@@ -531,6 +561,7 @@
   let mode = "DELIVERY";                              // default for a first-ever visit; see the mode-resume
                                                         // prompt in Init below for returning-visitor behavior
   let exportedThisSession = false;                    // gates Clear log - see clearLogBtn wiring
+  let scanSearchQuery = "";                            // lowercased TagID filter for the scan list - display only, never affects export
   const lastSeenAt = new Map();                        // TagID -> ms timestamp, for the 3s debounce
   const DEBOUNCE_MS = 3000;
 
@@ -672,10 +703,11 @@
       <p><strong>DELIVERY / INSTALL</strong> — sets what a scan logs. Every tag scanned while a mode is active is logged with that action automatically, no extra tap needed.</p>
       <p><strong>Set device</strong> — names this phone so scans show which device made them (also shown in the exported filename).</p>
       <p><strong>Load register CSV</strong> — only needed if the asset list didn't load automatically. It's used to flag tags that aren't on the list, not to block scanning.</p>
-      <p><strong>Register / Device</strong> pills — show whether the tag list and device name are ready.</p>
-      <p><strong>Export CSV</strong> — downloads every scan recorded for the current job. Safe to export more than once - nothing is lost by re-exporting.</p>
+      <p><strong>Register / Device</strong> pills — show whether the tag list and device name are ready. Tap the <strong>Register</strong> pill to browse or search the full loaded list, including whether each tag's already been delivered/installed.</p>
+      <p><strong>Search scans</strong> — the box above the scan list filters what's shown by tag ID. It only changes what you see - it never affects what's exported or cleared.</p>
+      <p><strong>Export CSV</strong> — downloads every scan recorded this session. Safe to export more than once - nothing is lost by re-exporting.</p>
       <p><strong>Share</strong> — where supported, sends the exported file straight to another app (Teams, email, etc.) instead of only downloading it.</p>
-      <p><strong>Clear log</strong> — permanently deletes every scan for the current job. Only available after exporting at least once this session.</p>
+      <p><strong>Clear log</strong> — permanently deletes every scan recorded this session. Only available after exporting at least once this session.</p>
       <p><strong>Dark / Light</strong> — switches the colour theme. Defaults to light.</p>
       <p>Using Binary Eye instead of this app? Its printed <strong>#MODE:</strong> marker codes do the same job as the DELIVERY/INSTALL buttons above — you only need one or the other, not both.</p>
       <div class="modal-actions">
@@ -732,6 +764,89 @@
       };
       onModalEscape = cancel;
     });
+  }
+
+  // Browse/search the full loaded register - opened by tapping the register
+  // count pill. Not a promise-driven flow like the others above (nothing to
+  // resolve, just a Close button), same shape as showHelp(). Sets `processing`
+  // for as long as it's open (unlike showHelp()/showAddJobPrompt(), which
+  // don't) because this one is meant to stay open for a while as someone
+  // searches - without it, a decode arriving mid-search would silently
+  // overwrite the modal card out from under them.
+  const REGISTER_RESULT_CAP = 300;
+  function showRegisterBrowser() {
+    if (!register || !Array.isArray(register.items) || !register.items.length) {
+      modalCard.innerHTML = `
+        <h3>Register</h3>
+        <p>No register is loaded for this job yet. Use <strong>Load register CSV</strong> to load one.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" id="modalConfirm">Close</button>
+        </div>`;
+      modalRoot.hidden = false;
+      const close = () => closeModal();
+      document.getElementById("modalConfirm").onclick = close;
+      onModalEscape = close;
+      document.getElementById("modalConfirm").focus();
+      return;
+    }
+
+    const items = register.items;
+    processing = true;
+
+    modalCard.innerHTML = `
+      <h3>Register — ${items.length} item${items.length === 1 ? "" : "s"}</h3>
+      <input type="text" id="registerSearchInput" placeholder="Search TagID, type, description…" autocomplete="off">
+      <div id="registerResults" class="register-results"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-primary" id="modalConfirm">Close</button>
+      </div>`;
+    modalRoot.hidden = false;
+
+    const resultsEl = document.getElementById("registerResults");
+    const searchInput = document.getElementById("registerSearchInput");
+
+    function renderResults() {
+      const q = searchInput.value.trim().toLowerCase();
+      const filtered = q
+        ? items.filter((r) =>
+            (r.TagID || "").toLowerCase().includes(q) ||
+            (r.Type || "").toLowerCase().includes(q) ||
+            (r.Description || "").toLowerCase().includes(q))
+        : items;
+      if (!filtered.length) {
+        resultsEl.innerHTML = `<p class="register-empty">No matching items.</p>`;
+        return;
+      }
+      const shown = filtered.slice(0, REGISTER_RESULT_CAP);
+      resultsEl.innerHTML = shown.map((r) => {
+        // Reads the current scanIndex - reflects everything scanned before
+        // this modal was opened. Nothing scanned while it's open can show up
+        // here yet: `processing` (set above) blocks handleDecodedTag for as
+        // long as the register browser stays open.
+        const delivered = scanIndex.has(scanKey(r.TagID, "DELIVERED"));
+        const installed = scanIndex.has(scanKey(r.TagID, "INSTALLED"));
+        const badges = (delivered ? '<span class="reg-badge reg-badge-delivered">Delivered</span>' : "")
+          + (installed ? '<span class="reg-badge reg-badge-installed">Installed</span>' : "");
+        const desc = [r.Type, r.Description].filter(Boolean).join(" — ");
+        return `<div class="register-row">
+          <div class="register-row-main">
+            <span class="register-tag">${escapeHtml(r.TagID)}</span>
+            ${badges}
+          </div>
+          ${desc ? `<div class="register-row-desc">${escapeHtml(desc)}</div>` : ""}
+        </div>`;
+      }).join("") + (filtered.length > REGISTER_RESULT_CAP
+        ? `<p class="register-truncated">Showing first ${REGISTER_RESULT_CAP} of ${filtered.length} matches — refine your search to narrow it down.</p>`
+        : "");
+    }
+
+    renderResults();
+    searchInput.addEventListener("input", renderResults);
+    searchInput.focus();
+
+    const close = () => { processing = false; closeModal(); };
+    document.getElementById("modalConfirm").onclick = close;
+    onModalEscape = close;
   }
 
   // Device name is free text a person types, but it flows straight into a
@@ -855,6 +970,15 @@
     scanLog.unshift(entry);
     scanIndex.set(scanKey(tagId, action), entry);   // this entry is always the newest for its key
     saveScanLog();
+    // Clear an active search on every new scan - the scan list is this app's
+    // confirmation surface (flash/beep/vibrate all fire regardless), and a
+    // filter left over from browsing an earlier tag would otherwise hide a
+    // brand-new scan with zero on-screen feedback that anything's wrong.
+    if (scanSearchQuery) {
+      scanSearchQuery = "";
+      const scanSearchInput = document.getElementById("scanSearchInput");
+      if (scanSearchInput) scanSearchInput.value = "";
+    }
     renderScanList();
     renderCounts();
     return entry;
@@ -1144,6 +1268,9 @@
     exportedThisSession = false;   // Clear log's gate doesn't carry across a switch
     setClearLogEnabled(false);
     lastSeenAt.clear();            // a tag debounced under the old job shouldn't suppress it under the new one
+    scanSearchQuery = "";          // a search typed under the old job's log shouldn't silently hide the new one's
+    const scanSearchInput = document.getElementById("scanSearchInput");
+    if (scanSearchInput) scanSearchInput.value = "";
 
     renderJobSelect();
     renderStatus();
@@ -1169,12 +1296,21 @@
     else { dpill.textContent = "not set"; dpill.classList.add("warn"); }
   }
 
+  function matchesScanSearch(s) {
+    return !scanSearchQuery || (s.TagID || "").toLowerCase().includes(scanSearchQuery);
+  }
+
   function renderListSubtext() {
     const el = document.getElementById("listSubtext");
     if (!el) return;
     if (!scanLog.length) { el.textContent = ""; return; }
     const oldest = scanLog[scanLog.length - 1];   // newest-first array, so the last entry is the oldest
     const since = (oldest.timestamp || "").slice(0, 10);
+    if (scanSearchQuery) {
+      const matchCount = scanLog.filter(matchesScanSearch).length;
+      el.textContent = `${matchCount} matching "${scanSearchQuery}", ${scanLog.length} total since ${since}`;
+      return;
+    }
     el.textContent = `${scanLog.length} total, since ${since}`;
   }
 
@@ -1189,9 +1325,21 @@
   function renderScanList() {
     const listEl = document.getElementById("scanList");
     const emptyEl = document.getElementById("emptyMsg");
-    if (!scanLog.length) { listEl.innerHTML = ""; emptyEl.style.display = "block"; return; }
+    if (!scanLog.length) {
+      listEl.innerHTML = "";
+      emptyEl.textContent = "No scans yet. Point the camera at a QR label.";
+      emptyEl.style.display = "block";
+      return;
+    }
+    const filtered = scanSearchQuery ? scanLog.filter(matchesScanSearch) : scanLog;
+    if (!filtered.length) {
+      listEl.innerHTML = "";
+      emptyEl.textContent = `No scans match "${scanSearchQuery}".`;
+      emptyEl.style.display = "block";
+      return;
+    }
     emptyEl.style.display = "none";
-    listEl.innerHTML = scanLog.slice(0, 200).map((s) => {
+    listEl.innerHTML = filtered.slice(0, 200).map((s) => {
       const time = melbourneTimeOnly(new Date(s.timestamp));
       const unknown = register && !findInRegister(s.TagID);
       return `<div class="scan-row action-${escapeHtml(s.action)}">
@@ -1247,7 +1395,7 @@
       renderStatus();
     }
     if (!scanLog.length) {
-      await showConfirm({ title: "Nothing to export", message: "No scans recorded yet for this job.", confirmLabel: "OK", cancelLabel: "OK" });
+      await showConfirm({ title: "Nothing to export", message: "No scans recorded yet this session.", confirmLabel: "OK", cancelLabel: "OK" });
       return false;
     }
     return true;
@@ -1270,7 +1418,7 @@
     const btn = document.getElementById("clearLogBtn");
     if (!btn) return;
     btn.disabled = !enabled;
-    btn.title = enabled ? "Clear all scans for this job" : "Export at least once this session to enable";
+    btn.title = enabled ? "Clear all scans for this session" : "Export at least once this session to enable";
   }
 
   function markExported() {
@@ -1380,6 +1528,17 @@
     persistOrWarn(GLOBAL_KEYS.speak, speakEnabled);
   });
 
+  document.getElementById("scanSearchInput").addEventListener("input", (ev) => {
+    scanSearchQuery = ev.target.value.trim().toLowerCase();
+    renderScanList();
+    renderListSubtext();
+  });
+
+  document.getElementById("registerPill").addEventListener("click", () => {
+    if (processing) return;   // don't open a second modal over an in-flight decode-confirm
+    showRegisterBrowser();
+  });
+
   document.getElementById("themeToggleBtn").addEventListener("click", toggleTheme);
   document.getElementById("helpBtn").addEventListener("click", showHelp);
 
@@ -1390,9 +1549,16 @@
 
   document.getElementById("clearLogBtn").addEventListener("click", async () => {
     if (!exportedThisSession) return;   // belt-and-suspenders - the button is also `disabled` until this is true
+    // Deliberately precise here, unlike the "this session" wording used
+    // elsewhere for the scan list/search - this log is actually a per-job,
+    // multi-week accumulation (that's exactly why Chunk B originally fixed
+    // the old "scans this session" heading for being dishonest), and this is
+    // the one irreversible action where understating what's about to be
+    // deleted would be a real problem, not just a wording preference.
+    const oldest = scanLog.length ? (scanLog[scanLog.length - 1].timestamp || "").slice(0, 10) : null;
     const ok = await showTypedConfirm({
       title: "Clear log",
-      message: "This permanently deletes every scan recorded for this job. You've already exported this session, so that data is safely in the CSV - but this cannot be undone here.",
+      message: `This permanently deletes all ${scanLog.length} scan${scanLog.length === 1 ? "" : "s"} stored for this job on this phone${oldest ? ", going back to " + oldest : ""}. You've already exported this session, so that data is safely in the CSV - but this cannot be undone here.`,
       confirmWord: "YES",
       confirmLabel: "Clear log",
       cancelLabel: "Keep scans",
