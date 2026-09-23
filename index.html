@@ -236,6 +236,15 @@
     animation: scanFlash 650ms ease-out forwards;
   }
   #scanFlash.flash-err.run { animation: scanFlashErr 900ms ease-out forwards; }
+  /* Green is the everyday case (most scans), so it's deliberately quieter:
+     a border only - no tint over the camera, so the next label can be lined
+     up straight away - and a shorter pulse. Amber/red stay full strength
+     because those are the scans that were NOT logged. */
+  #scanFlash.flash-ok.run {
+    background: none;
+    box-shadow: inset 0 0 0 12px var(--c);
+    animation: scanFlash 320ms ease-out forwards;
+  }
   @keyframes scanFlash { 0% { opacity: 1; } 55% { opacity: 0.9; } 100% { opacity: 0; } }
   /* Errors blink twice, so red is distinguishable from green/amber by rhythm
      alone (sunlight, colour-blindness, glancing sideways). */
@@ -1165,7 +1174,8 @@
   document.addEventListener("touchend", unlockAudio, true);
 
   // Plays a sequence of tones: [[freqHz, durationMs, gapAfterMs, wave?], ...]
-  function tones(seq) {
+  function tones(seq, vol) {
+    vol = vol || 0.35;
     const ctx = getAudioCtx();
     if (!ctx) return;
     try {
@@ -1179,8 +1189,8 @@
         // Short attack/release ramps - avoids the click of a hard start/stop
         // and lets the volume go louder without sounding harsh.
         gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
-        gain.gain.setValueAtTime(0.35, t + ms / 1000 - 0.02);
+        gain.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+        gain.gain.setValueAtTime(vol, t + ms / 1000 - 0.02);
         gain.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
         osc.start(t);
         osc.stop(t + ms / 1000 + 0.02);
@@ -1202,11 +1212,11 @@
   }
   // One distinct flash + sound + vibration per outcome, so the result can be
   // told apart without looking straight at the screen:
-  //   ok   - bright green, rising two-tone chirp, one short buzz
+  //   ok   - quick green border pulse, short soft chirp, one tick (the everyday case - kept light)
   //   warn - amber, two flat mid beeps, two short buzzes
   //   err  - red double-blink, low harsh tone, two long buzzes
   const FEEDBACK = {
-    ok:   { tones: [[1320, 70, 20], [1760, 110, 0]],                 vib: 80 },
+    ok:   { tones: [[1320, 45, 15], [1760, 60, 0]], vol: 0.2,        vib: 30 },
     warn: { tones: [[660, 110, 70], [660, 110, 0]],                  vib: [70, 70, 70] },
     err:  { tones: [[220, 180, 60, "square"], [180, 260, 0, "square"]], vib: [250, 100, 250] },
   };
@@ -1218,7 +1228,7 @@
   }
   function feedback(kind) {
     flash(kind);
-    tones(FEEDBACK[kind].tones);
+    tones(FEEDBACK[kind].tones, FEEDBACK[kind].vol);
     vibrate(FEEDBACK[kind].vib);
   }
 
