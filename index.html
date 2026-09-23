@@ -60,7 +60,7 @@
        they have to read at a glance in direct sunlight AND in a dark tunnel,
        so they don't flip with light/dark like the rest of the palette. Each
        also carries an icon + word, so colour is never the only signal. */
-    --ok: #0f9d38;       --ok-flash: #22e05a;   --ok-ink: #ffffff;
+    --ok: #0b7a2c;       --ok-flash: #22e05a;   --ok-ink: #ffffff;
     --warn: #ffb300;     --warn-flash: #ffc400; --warn-ink: #1a1400;
     --err: #d9241b;      --err-flash: #ff2a1f;  --err-ink: #ffffff;
     --tap-min: 56px;     /* minimum height for anything tapped while wearing gloves */
@@ -266,10 +266,15 @@
     font-size: 26px; font-weight: 800; line-height: 1.15;
     font-family: ui-monospace, Consolas, monospace; word-break: break-all;
   }
-  .result-detail { font-size: 14px; font-weight: 600; opacity: 0.92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Wraps to 2 lines rather than truncating - on a warn/err card this line
+     is where "NOT logged" lives, and it must never be the part cut off. */
+  .result-detail {
+    font-size: 14px; font-weight: 700; line-height: 1.25;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  }
   #resultCard.result-idle .result-tag, #resultCard.result-msg .result-tag { font-size: 19px; font-family: inherit; word-break: normal; }
   .result-action {
-    flex-shrink: 0; min-height: var(--tap-min); min-width: 104px; padding: 8px 14px;
+    flex-shrink: 0; min-height: var(--tap-min); min-width: 96px; padding: 8px 12px;
     font-size: 16px; font-weight: 800; border-radius: 12px; cursor: pointer;
     border: 3px solid currentColor; background: rgba(255,255,255,0.92); color: #14181c;
   }
