@@ -56,6 +56,14 @@
     --scan-row-border: #999999;
     --shadow: rgba(0, 0, 0, 0.3);
     --focus-ring: #2f6fed;
+    /* Scan-result colours: deliberately theme-independent and saturated -
+       they have to read at a glance in direct sunlight AND in a dark tunnel,
+       so they don't flip with light/dark like the rest of the palette. Each
+       also carries an icon + word, so colour is never the only signal. */
+    --ok: #0f9d38;       --ok-flash: #22e05a;   --ok-ink: #ffffff;
+    --warn: #ffb300;     --warn-flash: #ffc400; --warn-ink: #1a1400;
+    --err: #d9241b;      --err-flash: #ff2a1f;  --err-ink: #ffffff;
+    --tap-min: 56px;     /* minimum height for anything tapped while wearing gloves */
     color-scheme: light;
   }
   /* Dark palette: not a dimmed/compromise mode - tuned to hold the same
@@ -90,6 +98,9 @@
     font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
     -webkit-tap-highlight-color: transparent;
   }
+  /* No double-tap-zoom delay on any control - a gloved tap should register
+     immediately, and an accidental double tap shouldn't zoom the page. */
+  button, select, input, label { touch-action: manipulation; }
   body {
     display: flex; flex-direction: column; min-height: 100dvh;
     transition: background-color 150ms ease, color 150ms ease;
@@ -124,23 +135,26 @@
     display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
   }
   #jobSelect {
-    flex: 1; min-width: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
-    padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--surface); color: var(--text-muted);
+    flex: 1; min-width: 0; min-height: 48px; font-size: 14px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 8px 10px; border-radius: 8px; border: 2px solid var(--border);
+    background: var(--surface); color: var(--ink);
   }
-  #addJobBtn {
-    font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap;
+  #menuBtn {
+    min-height: 48px; min-width: 88px; font-size: 16px; font-weight: 700; padding: 8px 14px;
+    border-radius: 8px; border: 2px solid var(--ink); background: var(--surface); color: var(--ink);
+    cursor: pointer; white-space: nowrap;
   }
+  #menuBtn:active { opacity: 0.75; }
 
   #modeToggle {
     display: flex; gap: 8px;
   }
   .mode-btn {
-    flex: 1; padding: 14px 6px; font-size: 18px; font-weight: 700;
-    border: 3px solid var(--border); border-radius: 10px; background: var(--surface);
+    flex: 1; min-height: 72px; padding: 10px 6px; font-size: 22px; font-weight: 800; letter-spacing: 0.02em;
+    border: 3px solid var(--border); border-radius: 12px; background: var(--surface);
     color: var(--text-muted); cursor: pointer;
   }
+  .mode-btn:active { transform: scale(0.98); }
   .mode-btn.active[data-mode="DELIVERY"] {
     background: var(--delivery-color); color: #fff; border-color: var(--delivery-color);
   }
@@ -148,34 +162,29 @@
     background: var(--install-color); color: #fff; border-color: var(--install-color);
   }
 
+  /* Register/device status. Both pills are buttons (tap the register pill to
+     browse/search it, tap the device pill to rename this phone), so each gets
+     a real glove-sized tap target rather than the old 24px status chips. The
+     rarely-used controls that used to crowd this row (load CSV, theme, speak,
+     help, add job) now live in the Menu sheet - see showMenu(). */
   #statusRow {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-top: 8px; font-size: 12px; color: var(--text-muted); gap: 8px; flex-wrap: wrap;
+    display: flex; align-items: stretch; gap: 8px; margin-top: 8px;
   }
-  #statusRow button {
-    font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--surface); color: var(--ink); cursor: pointer;
+  #statusRow .pill {
+    flex: 1 1 0; min-width: 0; min-height: 48px; padding: 4px 10px;
+    display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+    border: 2px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--ink);
+    font: inherit; text-align: left; cursor: pointer; -webkit-appearance: none; appearance: none;
   }
-  #helpBtn { font-weight: 700; }
-  .pill {
-    display: inline-block; padding: 2px 8px; border-radius: 999px;
-    background: var(--surface-alt); font-weight: 600;
-  }
-  .pill.warn { background: var(--danger-bg); color: var(--danger); }
-  /* #registerPill is a <button> (tap to browse/search the register), not a
-     plain status span - reset the button chrome so it still just looks like
-     a pill, and give it a real tap target (a plain status pill can afford to
-     be tiny; a control glove-tapped in the field can't - see the plan's
-     "no tap-target shrinkage" invariant). Selector needs to match #statusRow
-     button's specificity (an ID beats a bare class) to actually win. */
-  #statusRow button.pill {
-    border: none; font: inherit; cursor: pointer; -webkit-appearance: none; appearance: none;
-    padding: 8px 12px; min-height: 32px;
-  }
+  #statusRow .pill:active { opacity: 0.75; }
+  .pill-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+  .pill-value { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  #statusRow .pill.warn { background: var(--danger-bg); border-color: var(--danger); }
+  #statusRow .pill.warn .pill-value { color: var(--danger); }
 
   /* ---- Camera ---- */
   #cameraWrap {
-    position: relative; width: 100%; aspect-ratio: 3 / 4; max-height: 46vh;
+    position: relative; width: 100%; aspect-ratio: 3 / 4; max-height: 40vh;
     background: #000; overflow: hidden; flex-shrink: 0;
   }
   #video { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -190,7 +199,7 @@
      either way, rather than borrowing --ink/--surface which flip meaning
      between themes and would sometimes render dark-on-dark. */
   .overlay-btn {
-    padding: 10px 18px; font-size: 15px; font-weight: 700; border-radius: 8px; border: none; cursor: pointer;
+    min-height: var(--tap-min); padding: 12px 28px; font-size: 18px; font-weight: 700; border-radius: 10px; border: none; cursor: pointer;
     background: #ffffff; color: #14181c;
   }
   .overlay-btn:active { opacity: 0.85; }
@@ -200,13 +209,75 @@
     pointer-events: none;
     /* width/height are set in JS - see sizeScanFrame() for why they can't be CSS. */
   }
-  #flashHit {
-    position: absolute; inset: 0; background: rgba(60, 200, 90, 0.35); opacity: 0; pointer-events: none;
-    transition: opacity 120ms ease;
+  /* Torch toggle - only shown when the camera actually supports it (see
+     setUpTorch()). Sits inside the camera box so it's reachable one-handed. */
+  #torchBtn {
+    position: absolute; right: 10px; bottom: 10px; z-index: 2;
+    min-width: 64px; min-height: 64px; padding: 6px 12px; border-radius: 14px;
+    border: 3px solid rgba(255,255,255,0.9); background: rgba(0,0,0,0.55); color: #fff;
+    font-size: 15px; font-weight: 800; cursor: pointer;
   }
+  #torchBtn[hidden] { display: none; }
+  #torchBtn[aria-pressed="true"] { background: #ffd54a; color: #14181c; border-color: #ffd54a; }
+
+  /* Full-screen scan flash. Sits above everything except modals, never
+     intercepts taps. A thick inset border in the result colour plus a strong
+     tint - visible in peripheral vision even when you're looking at the
+     label, not the screen. Restarted per scan by flash(). */
+  #scanFlash {
+    position: fixed; inset: 0; z-index: 45; pointer-events: none; opacity: 0;
+  }
+  #scanFlash.flash-ok   { --c: var(--ok-flash); }
+  #scanFlash.flash-warn { --c: var(--warn-flash); }
+  #scanFlash.flash-err  { --c: var(--err-flash); }
+  #scanFlash.run {
+    background: color-mix(in srgb, var(--c) 55%, transparent);
+    box-shadow: inset 0 0 0 18px var(--c);
+    animation: scanFlash 650ms ease-out forwards;
+  }
+  #scanFlash.flash-err.run { animation: scanFlashErr 900ms ease-out forwards; }
+  @keyframes scanFlash { 0% { opacity: 1; } 55% { opacity: 0.9; } 100% { opacity: 0; } }
+  /* Errors blink twice, so red is distinguishable from green/amber by rhythm
+     alone (sunlight, colour-blindness, glancing sideways). */
+  @keyframes scanFlashErr { 0% { opacity: 1; } 25% { opacity: 0.15; } 45% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* ---- Last-scan result card: stays up until the next scan, so a result
+     missed in the moment can still be read afterwards. ---- */
+  #resultCard {
+    flex-shrink: 0; display: flex; align-items: center; gap: 12px;
+    min-height: 92px; padding: 10px 12px;
+    background: var(--surface-alt); color: var(--ink); border-bottom: 3px solid var(--border);
+  }
+  #resultCard.result-ok   { background: var(--ok);   color: var(--ok-ink);   border-color: var(--ok); }
+  #resultCard.result-warn { background: var(--warn); color: var(--warn-ink); border-color: var(--warn); }
+  #resultCard.result-err  { background: var(--err);  color: var(--err-ink);  border-color: var(--err); }
+  #resultCard.pop { animation: resultPop 260ms ease-out; }
+  @keyframes resultPop { 0% { transform: scale(0.96); } 100% { transform: scale(1); } }
+  .result-icon {
+    flex-shrink: 0; width: 56px; height: 56px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 34px; font-weight: 900; line-height: 1;
+    background: rgba(255,255,255,0.22); border: 3px solid currentColor;
+  }
+  #resultCard.result-idle .result-icon { font-size: 26px; color: var(--text-muted); }
+  .result-body { flex: 1; min-width: 0; }
+  .result-title { font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+  .result-tag {
+    font-size: 26px; font-weight: 800; line-height: 1.15;
+    font-family: ui-monospace, Consolas, monospace; word-break: break-all;
+  }
+  .result-detail { font-size: 14px; font-weight: 600; opacity: 0.92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #resultCard.result-idle .result-tag, #resultCard.result-msg .result-tag { font-size: 19px; font-family: inherit; word-break: normal; }
+  .result-action {
+    flex-shrink: 0; min-height: var(--tap-min); min-width: 104px; padding: 8px 14px;
+    font-size: 16px; font-weight: 800; border-radius: 12px; cursor: pointer;
+    border: 3px solid currentColor; background: rgba(255,255,255,0.92); color: #14181c;
+  }
+  .result-action[hidden] { display: none; }
+  .result-action:active { transform: scale(0.97); }
 
   /* ---- Scan list ---- */
-  #listWrap { flex: 1; overflow-y: auto; padding: 8px 10px 90px; }
+  #listWrap { flex: 1; overflow-y: auto; padding: 8px 10px 110px; }
   #listHeader {
     display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 10px;
     margin: 6px 2px;
@@ -216,13 +287,13 @@
   }
   #listSubtext { font-size: 12px; color: var(--text-faint); flex: 1 1 auto; }
   #clearLogBtn {
-    font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+    min-height: 44px; font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 8px; border: 2px solid var(--border);
     background: var(--surface); color: var(--ink); cursor: pointer;
   }
   #clearLogBtn:disabled { opacity: 0.5; cursor: not-allowed; }
   .scan-row {
     display: flex; align-items: baseline; gap: 8px; padding: 10px 10px; margin-bottom: 6px;
-    border-radius: 8px; border-left: 6px solid var(--scan-row-border); background: var(--scan-row-bg); font-size: 15px;
+    border-radius: 8px; border-left: 6px solid var(--scan-row-border); background: var(--scan-row-bg); font-size: 16px;
   }
   .scan-row.action-DELIVERED { border-left-color: var(--delivery-color); background: var(--delivery-bg); }
   .scan-row.action-INSTALLED { border-left-color: var(--install-color); background: var(--install-bg); }
@@ -243,14 +314,14 @@
   #scanCount small { display: block; font-weight: 400; color: var(--text-muted); font-size: 11px; }
   #exportGroup { margin-left: auto; display: flex; gap: 8px; }
   #shareBtn {
-    padding: 14px 16px; font-size: 15px; font-weight: 700;
-    border-radius: 10px; border: 2px solid var(--ink); background: var(--surface); color: var(--ink); cursor: pointer;
+    min-height: 60px; padding: 10px 16px; font-size: 17px; font-weight: 700;
+    border-radius: 12px; border: 3px solid var(--ink); background: var(--surface); color: var(--ink); cursor: pointer;
   }
   #shareBtn[hidden] { display: none; }
   #shareBtn:active { opacity: 0.8; }
   #exportBtn {
-    padding: 14px 20px; font-size: 16px; font-weight: 700;
-    border-radius: 10px; border: none; background: var(--ink); color: var(--paper); cursor: pointer;
+    min-height: 60px; padding: 10px 22px; font-size: 18px; font-weight: 800;
+    border-radius: 12px; border: none; background: var(--ink); color: var(--paper); cursor: pointer;
   }
   #exportBtn:active { opacity: 0.8; }
 
@@ -285,8 +356,24 @@
   }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
   .modal-actions button {
-    padding: 12px 18px; font-size: 15px; font-weight: 700; border-radius: 8px; border: none; cursor: pointer;
+    min-height: var(--tap-min); padding: 12px 20px; font-size: 17px; font-weight: 700; border-radius: 10px; border: none; cursor: pointer;
   }
+  /* Phones: stack modal buttons full-width, primary on top - a big target
+     anywhere across the screen instead of two small ones in a corner. */
+  @media (max-width: 520px) {
+    .modal-actions { flex-direction: column-reverse; }
+    .modal-actions button { width: 100%; }
+  }
+
+  /* ---- Menu sheet (opened by the Menu button) ---- */
+  .menu-list { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 14px; }
+  .menu-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    min-height: var(--tap-min); padding: 10px 16px; font-size: 17px; font-weight: 700; text-align: left;
+    border-radius: 12px; border: 2px solid var(--border); background: var(--paper); color: var(--ink); cursor: pointer;
+  }
+  .menu-item:active { opacity: 0.75; }
+  .menu-item .menu-state { font-size: 14px; font-weight: 700; color: var(--text-muted); }
   .modal-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-secondary { background: var(--surface-alt); color: var(--ink); }
   .btn-primary { background: var(--ink); color: var(--paper); }
@@ -308,7 +395,7 @@
 
   /* ---- Scan list search ---- */
   #scanSearchInput {
-    display: block; width: 100%; padding: 10px 12px; font-size: 14px;
+    display: block; width: 100%; min-height: 48px; padding: 10px 12px; font-size: 16px;
     border: 1px solid var(--border); border-radius: 8px; margin: 0 0 10px;
     background: var(--surface); color: var(--ink);
   }
@@ -322,38 +409,47 @@
   </div>
 
   <div id="onboardBanner" class="banner banner-info" hidden>
-    <span>New here? Tap <strong>?</strong> for a 30-second guide.</span>
+    <span>New here? Tap <strong>Menu → Quick guide</strong> for a 30-second guide.</span>
     <button type="button" id="onboardBannerClose" aria-label="Dismiss">×</button>
   </div>
 
   <div id="topbar">
     <div id="jobRow">
       <select id="jobSelect" aria-label="Active job"></select>
-      <button id="addJobBtn" type="button">+ Job</button>
+      <button id="menuBtn" type="button" aria-haspopup="dialog">☰ Menu</button>
     </div>
     <div id="modeToggle">
       <button class="mode-btn active" data-mode="DELIVERY" type="button">DELIVERY</button>
       <button class="mode-btn" data-mode="INSTALL" type="button">INSTALL</button>
     </div>
     <div id="statusRow">
-      <span>Register: <button type="button" id="registerPill" class="pill" aria-live="polite" title="Tap to view or search the register">none loaded</button></span>
-      <span>Device: <span id="devicePill" class="pill" aria-live="polite">not set</span></span>
-      <button id="loadRegisterBtn" type="button">Load register CSV</button>
-      <button id="setDeviceBtn" type="button">Set device</button>
-      <button id="themeToggleBtn" type="button">Dark</button>
-      <button id="helpBtn" type="button" aria-label="Help">?</button>
-      <label style="display:flex; align-items:center; gap:4px;">
-        <input type="checkbox" id="speakToggle"> speak
-      </label>
+      <button type="button" id="registerPill" class="pill" title="Tap to view or search the register">
+        <span class="pill-label">Register</span><span class="pill-value" id="registerPillValue" aria-live="polite">none loaded</span>
+      </button>
+      <button type="button" id="devicePill" class="pill" title="Tap to set this phone's device name">
+        <span class="pill-label">Device</span><span class="pill-value" id="devicePillValue" aria-live="polite">not set</span>
+      </button>
     </div>
   </div>
 
   <div id="cameraWrap">
     <video id="video" autoplay playsinline muted></video>
     <div id="scanFrame"></div>
-    <div id="flashHit"></div>
+    <button id="torchBtn" type="button" aria-pressed="false" hidden>Light</button>
     <div id="cameraOverlay">Starting camera…</div>
   </div>
+
+  <div id="resultCard" class="result-idle" role="status" aria-live="assertive">
+    <div class="result-icon" id="resultIcon" aria-hidden="true">◎</div>
+    <div class="result-body">
+      <div class="result-title" id="resultTitle">Ready</div>
+      <div class="result-tag" id="resultTag">Point the camera at a QR label</div>
+      <div class="result-detail" id="resultDetail"></div>
+    </div>
+    <button type="button" class="result-action" id="resultAction" hidden></button>
+  </div>
+
+  <div id="scanFlash" aria-hidden="true"></div>
 
   <div id="listWrap">
     <div id="listHeader">
@@ -697,27 +793,64 @@
   // there's nowhere else in the deployed app to put that (docs/ lives in the
   // private pipeline repo, unreachable from a phone).
   function showHelp() {
-    modalCard.innerHTML = `
-      <h3>Quick guide</h3>
-      <p><strong>Job selector</strong> (top) — switch which job's register and scan log you're working with, or tap <strong>+ Job</strong> to add a new one. Device name, theme, and Speak stay the same across every job - only the register and scan log switch.</p>
-      <p><strong>DELIVERY / INSTALL</strong> — sets what a scan logs. Every tag scanned while a mode is active is logged with that action automatically, no extra tap needed.</p>
-      <p><strong>Set device</strong> — names this phone so scans show which device made them (also shown in the exported filename).</p>
-      <p><strong>Load register CSV</strong> — only needed if the asset list didn't load automatically. It's used to flag tags that aren't on the list, not to block scanning.</p>
-      <p><strong>Register / Device</strong> pills — show whether the tag list and device name are ready. Tap the <strong>Register</strong> pill to browse or search the full loaded list, including whether each tag's already been delivered/installed.</p>
-      <p><strong>Search scans</strong> — the box above the scan list filters what's shown by tag ID. It only changes what you see - it never affects what's exported or cleared.</p>
-      <p><strong>Export CSV</strong> — downloads every scan recorded this session. Safe to export more than once - nothing is lost by re-exporting.</p>
-      <p><strong>Share</strong> — where supported, sends the exported file straight to another app (Teams, email, etc.) instead of only downloading it.</p>
-      <p><strong>Clear log</strong> — permanently deletes every scan recorded this session. Only available after exporting at least once this session.</p>
-      <p><strong>Dark / Light</strong> — switches the colour theme. Defaults to light.</p>
-      <p>Using Binary Eye instead of this app? Its printed <strong>#MODE:</strong> marker codes do the same job as the DELIVERY/INSTALL buttons above — you only need one or the other, not both.</p>
-      <div class="modal-actions">
-        <button type="button" class="btn-primary" id="modalConfirm">Close</button>
-      </div>`;
-    modalRoot.hidden = false;
-    const close = () => { closeModal(); markOnboarded(); };
-    document.getElementById("modalConfirm").onclick = close;
-    onModalEscape = close;
-    document.getElementById("modalConfirm").focus();
+    return new Promise((resolve) => {
+      modalCard.innerHTML = `
+        <h3>Quick guide</h3>
+        <p><strong>DELIVERY / INSTALL</strong> — sets what a scan logs. Every tag scanned while a mode is active is logged with that action automatically, no extra tap needed.</p>
+        <p><strong>Scan results</strong> — the whole screen flashes and the card under the camera shows what happened:<br>
+          <strong>✓ Green</strong> — logged.<br>
+          <strong>! Yellow</strong> — already logged with this action on this phone, so it was <em>not</em> logged again. Tap <strong>Log again</strong> if you really mean it.<br>
+          <strong>✕ Red</strong> — tag isn't in the register, so it was <em>not</em> logged. Tap <strong>Log anyway</strong> to log it (it'll show in the exception report).<br>
+          Each one also has its own beep and vibration. Holding a label in front of the camera won't re-scan it - move away and back to scan it again.</p>
+        <p><strong>Light</strong> (camera corner) — turns the phone's torch on/off, where the phone supports it.</p>
+        <p><strong>Register / Device</strong> — tap <strong>Register</strong> to browse or search the loaded tag list (including what's already been delivered/installed); tap <strong>Device</strong> to name this phone (shown in the exported filename).</p>
+        <p><strong>Export CSV</strong> — downloads every scan stored for this job. Safe to export more than once - nothing is lost by re-exporting. <strong>Share</strong> (where supported) sends it straight to Teams/email instead.</p>
+        <p><strong>Menu</strong> — switch/add jobs, load a register CSV (only needed if the list didn't load automatically), speak results aloud, dark/light theme, and this guide. The job selector switches which job's register and scan log you're working with; device name, theme and speak stay the same across every job.</p>
+        <p><strong>Search scans</strong> — filters the list by tag ID. Display only - never affects what's exported or cleared.</p>
+        <p><strong>Clear log</strong> — permanently deletes every scan stored for this job on this phone. Only available after exporting at least once this session.</p>
+        <p>Using Binary Eye instead of this app? Its printed <strong>#MODE:</strong> marker codes do the same job as the DELIVERY/INSTALL buttons above — you only need one or the other, not both.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" id="modalConfirm">Close</button>
+        </div>`;
+      modalRoot.hidden = false;
+      const close = () => { closeModal(); markOnboarded(); resolve(); };
+      document.getElementById("modalConfirm").onclick = close;
+      onModalEscape = close;
+      document.getElementById("modalConfirm").focus();
+    });
+  }
+
+  // Everything that isn't used on every scan lives here instead of as a row
+  // of small buttons in the header. Resolves with the chosen item's key (or
+  // null) and closes first, so the chosen action can open its own modal
+  // without two flows fighting over the one modal card.
+  function showMenu() {
+    return new Promise((resolve) => {
+      const items = [
+        { key: "guide",    label: "Quick guide" },
+        { key: "register", label: "Browse register", state: register && register.items && register.items.length ? `${register.items.length} items` : "none" },
+        { key: "loadcsv",  label: "Load register CSV…" },
+        { key: "device",   label: "Device name", state: deviceName || "not set" },
+        { key: "speak",    label: "Speak results aloud", state: speakEnabled ? "ON" : "OFF" },
+        { key: "theme",    label: "Theme", state: theme === "dark" ? "Dark" : "Light" },
+        { key: "addjob",   label: "Add new job…" },
+      ];
+      modalCard.innerHTML = `
+        <h3>Menu</h3>
+        <div class="menu-list">
+          ${items.map((it) => `<button type="button" class="menu-item" data-key="${it.key}">
+            <span>${escapeHtml(it.label)}</span>${it.state != null ? `<span class="menu-state">${escapeHtml(it.state)}</span>` : ""}
+          </button>`).join("")}
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" id="modalConfirm">Close</button>
+        </div>`;
+      modalRoot.hidden = false;
+      const pick = (key) => { closeModal(); resolve(key); };
+      modalCard.querySelectorAll(".menu-item").forEach((b) => { b.onclick = () => pick(b.dataset.key); });
+      document.getElementById("modalConfirm").onclick = () => pick(null);
+      onModalEscape = () => pick(null);
+    });
   }
 
   // Job id validated live (Create stays disabled until it's both well-formed
@@ -767,23 +900,21 @@
   }
 
   // Browse/search the full loaded register - opened by tapping the register
-  // count pill. Not a promise-driven flow like the others above (nothing to
-  // resolve, just a Close button), same shape as showHelp(). Sets `processing`
-  // for as long as it's open (unlike showHelp()/showAddJobPrompt(), which
-  // don't) because this one is meant to stay open for a while as someone
-  // searches - without it, a decode arriving mid-search would silently
-  // overwrite the modal card out from under them.
+  // pill (or from the Menu). Resolves when closed; like every modal here it's
+  // opened through withModalLock(), so no decode can overwrite the card while
+  // someone is searching.
   const REGISTER_RESULT_CAP = 300;
   function showRegisterBrowser() {
+    return new Promise((resolve) => {
     if (!register || !Array.isArray(register.items) || !register.items.length) {
       modalCard.innerHTML = `
         <h3>Register</h3>
-        <p>No register is loaded for this job yet. Use <strong>Load register CSV</strong> to load one.</p>
+        <p>No register is loaded for this job yet. Use <strong>Menu → Load register CSV</strong> to load one.</p>
         <div class="modal-actions">
           <button type="button" class="btn-primary" id="modalConfirm">Close</button>
         </div>`;
       modalRoot.hidden = false;
-      const close = () => closeModal();
+      const close = () => { closeModal(); resolve(); };
       document.getElementById("modalConfirm").onclick = close;
       onModalEscape = close;
       document.getElementById("modalConfirm").focus();
@@ -791,7 +922,6 @@
     }
 
     const items = register.items;
-    processing = true;
 
     modalCard.innerHTML = `
       <h3>Register — ${items.length} item${items.length === 1 ? "" : "s"}</h3>
@@ -821,8 +951,8 @@
       resultsEl.innerHTML = shown.map((r) => {
         // Reads the current scanIndex - reflects everything scanned before
         // this modal was opened. Nothing scanned while it's open can show up
-        // here yet: `processing` (set above) blocks handleDecodedTag for as
-        // long as the register browser stays open.
+        // here yet: withModalLock() blocks handleDecodedTag for as long as
+        // the register browser stays open.
         const delivered = scanIndex.has(scanKey(r.TagID, "DELIVERED"));
         const installed = scanIndex.has(scanKey(r.TagID, "INSTALLED"));
         const badges = (delivered ? '<span class="reg-badge reg-badge-delivered">Delivered</span>' : "")
@@ -844,9 +974,21 @@
     searchInput.addEventListener("input", renderResults);
     searchInput.focus();
 
-    const close = () => { processing = false; closeModal(); };
+    const close = () => { closeModal(); resolve(); };
     document.getElementById("modalConfirm").onclick = close;
     onModalEscape = close;
+    });
+  }
+
+  // Every user-opened modal goes through this. While one is open, decodes
+  // are ignored outright (see handleDecodedTag) - otherwise a label drifting
+  // past the camera mid-dialog would overwrite the shared modal card and
+  // leave the open dialog's promise hanging forever. Returns undefined
+  // without opening anything if another modal already holds the lock.
+  async function withModalLock(fn) {
+    if (processing) return undefined;
+    processing = true;
+    try { return await fn(); } finally { processing = false; }
   }
 
   // Device name is free text a person types, but it flows straight into a
@@ -888,8 +1030,6 @@
   function applyTheme(t) {
     theme = t === "dark" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", theme);
-    const btn = document.getElementById("themeToggleBtn");
-    if (btn) btn.textContent = theme === "dark" ? "Light" : "Dark";
   }
   function toggleTheme() {
     applyTheme(theme === "dark" ? "light" : "dark");
@@ -965,7 +1105,7 @@
     return scanIndex.get(scanKey(tagId, action)) || null;
   }
 
-  async function recordScan(tagId, action) {
+  function recordScan(tagId, action) {
     const entry = { TagID: tagId, timestamp: melbourneIso(), action, device: deviceName || "UNKNOWN_DEVICE" };
     scanLog.unshift(entry);
     scanIndex.set(scanKey(tagId, action), entry);   // this entry is always the newest for its key
@@ -995,17 +1135,52 @@
   // ===========================================================================
   //  Feedback: beep (WebAudio, no external file), vibration, optional speech
   // ===========================================================================
+  // Browsers only let an AudioContext make sound once it's been created or
+  // resumed inside a user gesture. The first beep fires from the decode
+  // loop (not a gesture), so without this unlock the context starts
+  // "suspended" and the scan beeps are silently lost - most noticeably on
+  // iPhones, where there's no vibration to fall back on either. Any tap
+  // anywhere (e.g. choosing DELIVERY/INSTALL) unlocks it for the session.
   let audioCtx = null;
-  function beep(freq, ms) {
+  function getAudioCtx() {
     try {
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.frequency.value = freq;
-      osc.connect(gain); gain.connect(audioCtx.destination);
-      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-      osc.start();
-      osc.stop(audioCtx.currentTime + ms / 1000);
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      return audioCtx;
+    } catch (e) { return null; }
+  }
+  function unlockAudio() {
+    const ctx = getAudioCtx();
+    if (ctx && ctx.state === "running") {
+      document.removeEventListener("pointerdown", unlockAudio, true);
+      document.removeEventListener("touchend", unlockAudio, true);
+    }
+  }
+  document.addEventListener("pointerdown", unlockAudio, true);
+  document.addEventListener("touchend", unlockAudio, true);
+
+  // Plays a sequence of tones: [[freqHz, durationMs, gapAfterMs, wave?], ...]
+  function tones(seq) {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    try {
+      let t = ctx.currentTime + 0.01;
+      for (const [freq, ms, gap, wave] of seq) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = wave || "sine";
+        osc.frequency.value = freq;
+        osc.connect(gain); gain.connect(ctx.destination);
+        // Short attack/release ramps - avoids the click of a hard start/stop
+        // and lets the volume go louder without sounding harsh.
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+        gain.gain.setValueAtTime(0.35, t + ms / 1000 - 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+        osc.start(t);
+        osc.stop(t + ms / 1000 + 0.02);
+        t += (ms + (gap || 0)) / 1000;
+      }
     } catch (e) { /* no audio available - not fatal */ }
   }
   function vibrate(pattern) {
@@ -1020,77 +1195,149 @@
       window.speechSynthesis.speak(u);
     } catch (e) { /* ignore */ }
   }
-  function flashHit() {
-    const el = document.getElementById("flashHit");
-    el.style.opacity = "1";
-    setTimeout(() => { el.style.opacity = "0"; }, 150);
+  // One distinct flash + sound + vibration per outcome, so the result can be
+  // told apart without looking straight at the screen:
+  //   ok   - bright green, rising two-tone chirp, one short buzz
+  //   warn - amber, two flat mid beeps, two short buzzes
+  //   err  - red double-blink, low harsh tone, two long buzzes
+  const FEEDBACK = {
+    ok:   { tones: [[1320, 70, 20], [1760, 110, 0]],                 vib: 80 },
+    warn: { tones: [[660, 110, 70], [660, 110, 0]],                  vib: [70, 70, 70] },
+    err:  { tones: [[220, 180, 60, "square"], [180, 260, 0, "square"]], vib: [250, 100, 250] },
+  };
+  function flash(kind) {
+    const el = document.getElementById("scanFlash");
+    el.className = "flash-" + kind;
+    void el.offsetWidth;   // force a reflow so re-adding .run restarts the animation on back-to-back scans
+    el.classList.add("run");
+  }
+  function feedback(kind) {
+    flash(kind);
+    tones(FEEDBACK[kind].tones);
+    vibrate(FEEDBACK[kind].vib);
+  }
+
+  // ===========================================================================
+  //  Last-scan result card (under the camera). Green/amber/red with an icon
+  //  and a word, not colour alone. A duplicate or an unknown tag is shown
+  //  here - NOT logged - with one big button to log it anyway; the old
+  //  blocking modals for those two cases cost a gloved user two taps per
+  //  scan and stopped the camera until answered. Doing nothing (just
+  //  scanning the next label) keeps the safe default: not logged.
+  // ===========================================================================
+  const RESULT_ICONS = { ok: "✓", warn: "!", err: "✕", idle: "◎" };
+  let resultActionFn = null;
+
+  // `message: true` = the big line is a sentence, not a tag ID (camera
+  // errors), so it gets normal text instead of the monospace tag style.
+  function showResult({ kind, title, tag, detail, actionLabel, onAction, message }) {
+    const card = document.getElementById("resultCard");
+    card.className = "result-" + kind + (message ? " result-msg" : "");
+    void card.offsetWidth;
+    if (kind !== "idle") card.classList.add("pop");
+    document.getElementById("resultIcon").textContent = RESULT_ICONS[kind] || "";
+    document.getElementById("resultTitle").textContent = title || "";
+    document.getElementById("resultTag").textContent = tag || "";
+    document.getElementById("resultDetail").textContent = detail || "";
+    const btn = document.getElementById("resultAction");
+    resultActionFn = onAction || null;
+    btn.hidden = !onAction;
+    btn.textContent = actionLabel || "";
+  }
+  function showIdleResult() {
+    showResult({ kind: "idle", title: "Ready", tag: "Point the camera at a QR label" });
+  }
+  document.getElementById("resultAction").addEventListener("click", () => {
+    const fn = resultActionFn;
+    resultActionFn = null;
+    if (fn) fn();
+  });
+
+  function describeTag(known) {
+    return known ? [known.Type, known.Description].filter(Boolean).join(" — ") : "";
+  }
+
+  function commitScan(tagId, action, known) {
+    recordScan(tagId, action);
+    showResult({
+      kind: "ok",
+      title: `Logged ${action}`,
+      tag: tagId,
+      detail: describeTag(known) || (register ? "" : "No register loaded - not checked"),
+    });
+    feedback("ok");
+    speak(`${tagId} ${action.toLowerCase()}`);
   }
 
   // ===========================================================================
   //  Handling a decoded QR value
   // ===========================================================================
-  let processing = false;
+  let processing = false;   // true while a modal is open - see withModalLock()
 
-  async function handleDecodedTag(rawText) {
+  function handleDecodedTag(rawText) {
     const tagId = (rawText || "").trim();
     if (!tagId) return;
 
-    // Check `processing` FIRST: while a confirm modal is open (waiting on the
-    // user), every incoming decode - of this tag or any other - is ignored
-    // outright, without touching the debounce clock. Otherwise a decode that
-    // arrives mid-modal would still update lastSeenAt and silently push the
-    // debounce window further out, so a deliberate re-scan right after the
-    // user dismisses the modal could get swallowed with no feedback at all.
-    // The same flag is set during the mode-resume prompt at startup and a job
-    // switch, for the same reason.
+    // Check `processing` FIRST: while a modal is open (waiting on the user),
+    // every incoming decode - of this tag or any other - is ignored outright,
+    // without touching the debounce clock. Otherwise a decode that arrives
+    // mid-modal would still update lastSeenAt and silently push the debounce
+    // window further out, so a deliberate re-scan right after the user
+    // dismisses the modal could get swallowed with no feedback at all.
     if (processing) return;
 
+    // Sliding debounce: every sighting of a tag refreshes its clock, so a
+    // label held in front of the camera fires exactly once, however long it
+    // stays in view (the old fixed 3s window re-fired it every 3s - which
+    // now would mean an amber "already scanned" alarm going off repeatedly).
+    // To scan the same label again deliberately, move away for ~3s and back.
     const now = Date.now();
     const lastSeen = lastSeenAt.get(tagId);
-    if (lastSeen && now - lastSeen < DEBOUNCE_MS) return;   // silent debounce, not a popup
     lastSeenAt.set(tagId, now);
+    if (lastSeen && now - lastSeen < DEBOUNCE_MS) return;
 
-    processing = true;
-    try {
-      const action = mode === "DELIVERY" ? "DELIVERED" : "INSTALLED";
+    // Captured NOW, at scan time: a "Log again"/"Log anyway" tapped later
+    // must log what was being done when the label was scanned, even if the
+    // mode toggle has been changed since.
+    const action = mode === "DELIVERY" ? "DELIVERED" : "INSTALLED";
+    const known = findInRegister(tagId);
+    const logIt = () => commitScan(tagId, action, known);
 
-      // Only prompt when a register is actually loaded to judge against - a
-      // job with none (every freshly-created job, until someone loads a CSV)
-      // can't tell "unknown" from "no data to check", so it shouldn't flag
-      // every single scan. Matches the same distinction renderScanList()
-      // already makes for the "not in register" list flag.
-      const known = findInRegister(tagId);
-      if (register && !known) {
-        const proceed = await showConfirm({
-          title: "Unknown tag",
-          message: `"${tagId}" is not in the loaded register. Log it anyway? (It will show up in the exception report.)`,
-          confirmLabel: "Log anyway",
-          cancelLabel: "Discard",
-          danger: true,
-        });
-        if (!proceed) return;
-      }
-
-      const dup = alreadyLoggedSameAction(tagId, action);
-      if (dup) {
-        const dupTime = melbourneTimeOnly(new Date(dup.timestamp));
-        const proceed = await showConfirm({
-          title: "Already scanned",
-          message: `"${tagId}" was already logged as ${action} at ${dupTime} on this phone. This does not check other phones — if two people are scanning the same tags, check with the team.`,
-          confirmLabel: "Log again",
-          cancelLabel: "Skip",
-        });
-        if (!proceed) return;
-      }
-
-      await recordScan(tagId, action);
-      flashHit();
-      beep(action === "DELIVERED" ? 700 : 900, 120);
-      vibrate(60);
-      speak(`${tagId} ${action.toLowerCase()}`);
-    } finally {
-      processing = false;
+    // Only flag unknown tags when a register is actually loaded to judge
+    // against - a job with none (every freshly-created job, until someone
+    // loads a CSV) can't tell "unknown" from "no data to check". Matches the
+    // same distinction renderScanList() makes for its "not in register" flag.
+    if (register && !known) {
+      showResult({
+        kind: "err",
+        title: "Not in register",
+        tag: tagId,
+        detail: "NOT logged - check the label",
+        actionLabel: "Log anyway",
+        onAction: logIt,
+      });
+      feedback("err");
+      speak("Unknown tag. Not logged.");
+      return;
     }
+
+    const dup = alreadyLoggedSameAction(tagId, action);
+    if (dup) {
+      const dupTime = melbourneTimeOnly(new Date(dup.timestamp));
+      showResult({
+        kind: "warn",
+        title: `Already ${action.toLowerCase()}`,
+        tag: tagId,
+        detail: `Not logged again - first at ${dupTime}`,
+        actionLabel: "Log again",
+        onAction: logIt,
+      });
+      feedback("warn");
+      speak("Already scanned.");
+      return;
+    }
+
+    logIt();
   }
 
   // ===========================================================================
@@ -1146,13 +1393,45 @@
 
   const jsQRDecode = window.jsQR && window.jsQR.default ? window.jsQR.default : window.jsQR;
 
+  // jsQR is pure JS, so its cost scales with pixel count. Decoding only the
+  // centre of the frame (where the aim box is) and downscaling that to at
+  // most JSQR_MAX_SIDE px is several times faster than the old full
+  // 1280x960 frame on a mid-range phone, and a label filling the aim box is
+  // still far above jsQR's minimum module size at that resolution.
+  const JSQR_CROP = 0.8;        // fraction of the shorter video side to decode
+  const JSQR_MAX_SIDE = 640;
+  const LOOP_DELAY_MS = 30;     // breathing room between attempts - decode time itself sets the pace
+
+  let stream = null;
+  let videoTrack = null;
+  let loopGen = 0;              // bumped on every start/stop, so a stale loop from an old stream exits
+  let cameraStarting = false;
+  let wakeLock = null;
+
+  function stopCamera() {
+    loopGen++;
+    clearTimeout(scanTimer);
+    scanTimer = null;
+    if (stream) stream.getTracks().forEach((t) => { try { t.stop(); } catch (e) { /* already stopped */ } });
+    stream = null;
+    videoTrack = null;
+    video.srcObject = null;
+    setTorchButton(false, false);
+    releaseWakeLock();
+  }
+
   async function startCamera() {
+    if (cameraStarting) return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setOverlayMessage("This browser has no camera API. Open this page over HTTPS (or localhost) in Chrome.");
+      showResult({ kind: "err", message: true, title: "Camera unavailable", tag: "No camera API", detail: "Open this page over HTTPS in Chrome" });
       return;
     }
+    cameraStarting = true;
+    stopCamera();   // never leave a previous stream/loop running alongside the new one (Retry, tab return)
+    const gen = loopGen;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: "environment" },
           width: { ideal: 1280 }, height: { ideal: 960 },
@@ -1166,48 +1445,139 @@
         },
         audio: false,
       });
+      if (gen !== loopGen) {   // stopped (tab hidden) while waiting on permission - don't keep this stream
+        stream.getTracks().forEach((t) => t.stop());
+        stream = null;
+        cameraStarting = false;
+        // The tab may already be visible again (its restart was skipped
+        // because this start was still in flight) - pick it back up.
+        if (!document.hidden) startCamera();
+        return;
+      }
+      videoTrack = stream.getVideoTracks()[0] || null;
+      // The OS can take the camera away (another app, a phone call); the
+      // track then ends silently and the preview freezes. Say so, with a
+      // one-tap way back, instead of a frozen picture that looks like it's
+      // still scanning.
+      if (videoTrack) videoTrack.addEventListener("ended", () => {
+        if (gen !== loopGen) return;
+        setOverlayMessage("Camera stopped.", { retry: true });
+      });
       video.srcObject = stream;
       await video.play();
       overlay.classList.add("hidden");
       sizeScanFrame();
     } catch (e) {
+      cameraStarting = false;
       setOverlayMessage(
         "Camera access failed: " + (e && e.message ? e.message : e) +
         ". On a phone, this page must be served over HTTPS (or via the insecure-origin flag for testing).",
         { retry: true }
       );
+      showResult({ kind: "err", message: true, title: "Camera not working", tag: "Tap Retry on the camera", detail: String((e && e.name) || e) });
       return;
     }
+    cameraStarting = false;
+    if (gen !== loopGen) return;
 
-    decodeCanvas = document.createElement("canvas");
-    decodeCtx = decodeCanvas.getContext("2d", { willReadFrequently: true });
-    const which = await setUpDetector();
-    if (which) scanLoop();
+    // Clear a stale "camera not working" card left from a failed attempt.
+    if (document.getElementById("resultCard").classList.contains("result-err") && !resultActionFn) showIdleResult();
+    setUpTorch();
+    requestWakeLock();
+    if (!decodeCanvas) {
+      decodeCanvas = document.createElement("canvas");
+      decodeCtx = decodeCanvas.getContext("2d", { willReadFrequently: true });
+    }
+    const which = barcodeDetector ? "native BarcodeDetector" : await setUpDetector();
+    if (which && gen === loopGen) scanLoop(gen);
   }
 
-  async function scanLoop() {
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+  function decodeJsQR() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const side = Math.floor(Math.min(vw, vh) * JSQR_CROP);
+    const sx = Math.floor((vw - side) / 2), sy = Math.floor((vh - side) / 2);
+    const out = Math.min(side, JSQR_MAX_SIDE);
+    // Only resize when needed - assigning canvas.width (even to the same
+    // value) reallocates and clears it, which is wasted work every frame.
+    if (decodeCanvas.width !== out) { decodeCanvas.width = out; decodeCanvas.height = out; }
+    decodeCtx.drawImage(video, sx, sy, side, side, 0, 0, out, out);
+    const img = decodeCtx.getImageData(0, 0, out, out);
+    const result = jsQRDecode(img.data, out, out, { inversionAttempts: "dontInvert" });
+    return result && result.data ? result.data : null;
+  }
+
+  async function scanLoop(gen) {
+    if (gen !== loopGen) return;
+    if (!processing && video.readyState >= video.HAVE_CURRENT_DATA) {
       try {
         if (barcodeDetector) {
           const results = await barcodeDetector.detect(video);
-          if (results.length) await handleDecodedTag(results[0].rawValue);
+          if (gen === loopGen && results.length) handleDecodedTag(results[0].rawValue);
         } else if (jsQRDecode) {
-          decodeCanvas.width = video.videoWidth;
-          decodeCanvas.height = video.videoHeight;
-          decodeCtx.drawImage(video, 0, 0, decodeCanvas.width, decodeCanvas.height);
-          const imgData = decodeCtx.getImageData(0, 0, decodeCanvas.width, decodeCanvas.height);
-          const result = jsQRDecode(imgData.data, imgData.width, imgData.height, { inversionAttempts: "dontInvert" });
-          if (result && result.data) await handleDecodedTag(result.data);
+          const data = decodeJsQR();
+          if (data) handleDecodedTag(data);
         }
       } catch (e) { console.warn("decode error", e); }
     }
-    scanTimer = setTimeout(scanLoop, 80);   // ~12 decode attempts/sec - was 180ms/~5.5 per sec, felt
-                                             // slow to pick up a code; native BarcodeDetector is
-                                             // hardware-decoded (negligible cost per attempt) and
-                                             // jsQR on a single small frame is still comfortably
-                                             // under 80ms on any phone this runs on, so this doesn't
-                                             // meaningfully change battery/CPU load in practice.
+    if (gen !== loopGen) return;
+    scanTimer = setTimeout(() => scanLoop(gen), LOOP_DELAY_MS);
   }
+
+  // ---- Torch (tunnels are dark). Only offered where the camera reports it
+  // can do it - Android Chrome mostly yes, iPhone Safari no.
+  const torchBtn = document.getElementById("torchBtn");
+  let torchOn = false;
+  function setTorchButton(visible, on) {
+    torchOn = !!on;
+    torchBtn.hidden = !visible;
+    torchBtn.setAttribute("aria-pressed", torchOn ? "true" : "false");
+    torchBtn.textContent = torchOn ? "Light ON" : "Light";
+  }
+  function setUpTorch() {
+    let caps = null;
+    try { caps = videoTrack && videoTrack.getCapabilities ? videoTrack.getCapabilities() : null; } catch (e) { caps = null; }
+    setTorchButton(!!(caps && caps.torch), false);
+  }
+  torchBtn.addEventListener("click", async () => {
+    if (!videoTrack) return;
+    const want = !torchOn;
+    try {
+      await videoTrack.applyConstraints({ advanced: [{ torch: want }] });
+      setTorchButton(true, want);
+    } catch (e) {
+      showToast("This phone won't let the page turn the light on.");
+      setTorchButton(false, false);
+    }
+  });
+
+  // ---- Keep the screen awake while scanning: otherwise the phone dims and
+  // locks mid-walk and the next scan starts with an unlock + camera restart.
+  // Best-effort - unsupported browsers just behave as before.
+  async function requestWakeLock() {
+    try {
+      if (!("wakeLock" in navigator) || wakeLock) return;
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch (e) { wakeLock = null; }
+  }
+  function releaseWakeLock() {
+    try { if (wakeLock) wakeLock.release(); } catch (e) { /* ignore */ }
+    wakeLock = null;
+  }
+
+  // Leaving the tab (lock screen, switching to Teams to share the export)
+  // stops the camera - saves battery, and phones kill a background camera
+  // anyway, which used to leave a frozen preview on return. Coming back
+  // restarts it cleanly.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopCamera();
+    } else {
+      setOverlayMessage("Starting camera…");
+      startCamera();
+    }
+  });
 
   // Keeps the on-screen "aim here" frame an actual square regardless of the
   // phone's screen shape. #cameraWrap isn't square (aspect-ratio 3/4, further
@@ -1271,6 +1641,9 @@
     scanSearchQuery = "";          // a search typed under the old job's log shouldn't silently hide the new one's
     const scanSearchInput = document.getElementById("scanSearchInput");
     if (scanSearchInput) scanSearchInput.value = "";
+    // A pending "Log again"/"Log anyway" card belongs to the old job - tapping
+    // it after the switch would log that tag into the NEW job's scan log.
+    showIdleResult();
 
     renderJobSelect();
     renderStatus();
@@ -1284,16 +1657,11 @@
   // ===========================================================================
   function renderStatus() {
     const pill = document.getElementById("registerPill");
-    if (register && register.items.length) {
-      pill.textContent = `${register.items.length} items`;
-      pill.classList.remove("warn");
-    } else {
-      pill.textContent = "none loaded";
-      pill.classList.add("warn");
-    }
-    const dpill = document.getElementById("devicePill");
-    if (deviceName) { dpill.textContent = deviceName; dpill.classList.remove("warn"); }
-    else { dpill.textContent = "not set"; dpill.classList.add("warn"); }
+    const hasRegister = !!(register && Array.isArray(register.items) && register.items.length);
+    document.getElementById("registerPillValue").textContent = hasRegister ? `${register.items.length} items` : "none loaded";
+    pill.classList.toggle("warn", !hasRegister);
+    document.getElementById("devicePillValue").textContent = deviceName || "not set - tap";
+    document.getElementById("devicePill").classList.toggle("warn", !deviceName);
   }
 
   function matchesScanSearch(s) {
@@ -1472,61 +1840,81 @@
     persistOrWarn(JK.mode, m);
   }
   document.querySelectorAll(".mode-btn").forEach((btn) => {
-    btn.addEventListener("click", () => setMode(btn.dataset.mode));
+    btn.addEventListener("click", () => {
+      const changed = btn.dataset.mode !== mode;
+      setMode(btn.dataset.mode);
+      if (changed) {
+        vibrate(40);
+        showToast(`Now logging: ${mode === "DELIVERY" ? "DELIVERED" : "INSTALLED"}`);
+      }
+    });
   });
 
   document.getElementById("jobSelect").addEventListener("change", (ev) => {
-    if (processing) { renderJobSelect(); return; }   // revert - can't switch mid decode-confirm
+    if (processing) { renderJobSelect(); return; }   // revert - can't switch while a dialog is open
     switchJob(ev.target.value);
   });
-  document.getElementById("addJobBtn").addEventListener("click", async () => {
-    if (processing) return;   // don't open a second modal over an in-flight decode-confirm
-    const created = await showAddJobPrompt();
+
+  async function addJob() {
+    const created = await withModalLock(showAddJobPrompt);
     if (!created) return;
     jobs = jobs.concat([created]);
     persistOrWarn(GLOBAL_KEYS.jobs, jobs);
     switchJob(created.id);
+  }
+
+  async function setDeviceName() {
+    const name = await withModalLock(() => showDeviceNamePrompt(deviceName || ""));
+    if (name) { deviceName = name; persistOrWarn(GLOBAL_KEYS.device, deviceName); renderStatus(); }
+  }
+
+  function toggleSpeak() {
+    speakEnabled = !speakEnabled;
+    persistOrWarn(GLOBAL_KEYS.speak, speakEnabled);
+    showToast(`Speak results: ${speakEnabled ? "ON" : "OFF"}`);
+    if (speakEnabled) speak("Speech on");
+  }
+
+  document.getElementById("menuBtn").addEventListener("click", async () => {
+    const key = await withModalLock(showMenu);
+    switch (key) {
+      case "guide":    withModalLock(showHelp); break;
+      case "register": withModalLock(showRegisterBrowser); break;
+      case "loadcsv":  document.getElementById("csvFileInput").click(); break;
+      case "device":   setDeviceName(); break;
+      case "speak":    toggleSpeak(); break;
+      case "theme":    toggleTheme(); break;
+      case "addjob":   addJob(); break;
+      default: break;
+    }
   });
 
-  document.getElementById("loadRegisterBtn").addEventListener("click", () => {
-    document.getElementById("csvFileInput").click();
-  });
   document.getElementById("csvFileInput").addEventListener("change", async (ev) => {
     const file = ev.target.files[0];
     ev.target.value = "";
     if (!file) return;
-    // Gated by `processing` like every other modal in this file: this path now
-    // always ends in a modal (it used to only on the rare error), so without
-    // this a decode arriving mid-dialog would overwrite the card and orphan
-    // the await below.
-    processing = true;
-    try {
-      const text = await file.text();
-      const { count, duplicates } = loadRegisterFromCsvText(text);
-      const dupNote = duplicates
-        ? ` — ${duplicates} duplicate TagID${duplicates === 1 ? "" : "s"} found, only the first row of each was kept.`
-        : "";
-      await showConfirm({
-        title: "Register loaded",
-        message: `Loaded ${count} item${count === 1 ? "" : "s"}.${dupNote}`,
-        confirmLabel: "OK", cancelLabel: "OK",
-      });
-    } catch (e) {
-      await showConfirm({ title: "Couldn't load CSV", message: String(e.message || e), confirmLabel: "OK", cancelLabel: "OK" });
-    } finally {
-      processing = false;
-    }
+    // Always ends in a modal, so it holds the modal lock like every other
+    // dialog here - a decode arriving mid-dialog would otherwise overwrite
+    // the card and orphan the await below.
+    await withModalLock(async () => {
+      try {
+        const text = await file.text();
+        const { count, duplicates } = loadRegisterFromCsvText(text);
+        const dupNote = duplicates
+          ? ` — ${duplicates} duplicate TagID${duplicates === 1 ? "" : "s"} found, only the first row of each was kept.`
+          : "";
+        await showConfirm({
+          title: "Register loaded",
+          message: `Loaded ${count} item${count === 1 ? "" : "s"}.${dupNote}`,
+          confirmLabel: "OK", cancelLabel: "OK",
+        });
+      } catch (e) {
+        await showConfirm({ title: "Couldn't load CSV", message: String(e.message || e), confirmLabel: "OK", cancelLabel: "OK" });
+      }
+    });
   });
 
-  document.getElementById("setDeviceBtn").addEventListener("click", async () => {
-    const name = await showDeviceNamePrompt(deviceName || "");
-    if (name) { deviceName = name; persistOrWarn(GLOBAL_KEYS.device, deviceName); renderStatus(); }
-  });
-
-  document.getElementById("speakToggle").addEventListener("change", (ev) => {
-    speakEnabled = ev.target.checked;
-    persistOrWarn(GLOBAL_KEYS.speak, speakEnabled);
-  });
+  document.getElementById("devicePill").addEventListener("click", setDeviceName);
 
   document.getElementById("scanSearchInput").addEventListener("input", (ev) => {
     scanSearchQuery = ev.target.value.trim().toLowerCase();
@@ -1534,13 +1922,7 @@
     renderListSubtext();
   });
 
-  document.getElementById("registerPill").addEventListener("click", () => {
-    if (processing) return;   // don't open a second modal over an in-flight decode-confirm
-    showRegisterBrowser();
-  });
-
-  document.getElementById("themeToggleBtn").addEventListener("click", toggleTheme);
-  document.getElementById("helpBtn").addEventListener("click", showHelp);
+  document.getElementById("registerPill").addEventListener("click", () => withModalLock(showRegisterBrowser));
 
   document.getElementById("persistBannerClose").addEventListener("click", () => {
     document.getElementById("persistBanner").hidden = true;
@@ -1556,28 +1938,34 @@
     // the one irreversible action where understating what's about to be
     // deleted would be a real problem, not just a wording preference.
     const oldest = scanLog.length ? (scanLog[scanLog.length - 1].timestamp || "").slice(0, 10) : null;
-    const ok = await showTypedConfirm({
+    const ok = await withModalLock(() => showTypedConfirm({
       title: "Clear log",
       message: `This permanently deletes all ${scanLog.length} scan${scanLog.length === 1 ? "" : "s"} stored for this job on this phone${oldest ? ", going back to " + oldest : ""}. You've already exported this session, so that data is safely in the CSV - but this cannot be undone here.`,
       confirmWord: "YES",
       confirmLabel: "Clear log",
       cancelLabel: "Keep scans",
-    });
+    }));
     if (!ok) return;
     clearScanLog();
+    showIdleResult();   // a pending "Log again" would otherwise re-add a scan into the just-cleared log
     exportedThisSession = false;
     setClearLogEnabled(false);
   });
 
-  document.getElementById("exportBtn").addEventListener("click", doExport);
-  document.getElementById("shareBtn").addEventListener("click", doShare);
+  document.getElementById("exportBtn").addEventListener("click", () => withModalLock(doExport));
+  document.getElementById("shareBtn").addEventListener("click", () => withModalLock(doShare));
+
+  // Test hook, only with ?debug in the URL: lets the scan feedback be
+  // exercised on a PC with no camera (window.qrDebug.scan("NEL-001")).
+  if (/[?&]debug\b/.test(location.search)) {
+    window.qrDebug = { scan: handleDecodedTag, feedback, showResult };
+  }
 
   // ===========================================================================
   //  Init
   // ===========================================================================
   renderJobSelect();
   updateDocumentTitle();
-  document.getElementById("speakToggle").checked = !!speakEnabled;
   applyTheme(theme);
   setClearLogEnabled(exportedThisSession);
   renderStatus();
@@ -1639,10 +2027,7 @@
     // Ask for the device name up front so real scans get tagged correctly from
     // the first one, rather than only being asked the first time someone taps
     // Export.
-    if (!deviceName) {
-      const name = await showDeviceNamePrompt("");
-      if (name) { deviceName = name; persistOrWarn(GLOBAL_KEYS.device, deviceName); renderStatus(); }
-    }
+    if (!deviceName) await setDeviceName();
 
     // Mode is deliberately NOT auto-resumed silently - a returning visitor
     // whose last mode was INSTALL gets asked to confirm before any scan can be
