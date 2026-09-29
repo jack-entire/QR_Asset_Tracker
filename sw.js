@@ -15,7 +15,7 @@
 // JOB_ID note in index.html). Cache Storage is shared across the WHOLE
 // origin, not scoped per path, so without this a naive fixed cache name
 // would let one job's activate handler below delete another job's cache.
-const CACHE_VERSION = "v9";
+const CACHE_VERSION = "v11";
 const CACHE_PREFIX = "qr-scan-page-" + self.registration.scope;
 const CACHE_NAME = CACHE_PREFIX + "-" + CACHE_VERSION;
 // Deliberately NOT "./" here - it resolves differently across hosts (plain
@@ -43,7 +43,7 @@ self.addEventListener("install", (event) => {
         // get cached as if it were the real file, and every offline load
         // after that would serve the error page forever - checked here
         // instead of assuming a resolved fetch means a good response.
-        fetch(url)
+        fetch(url, { cache: "reload" })   // bypass the browser HTTP cache, or an update can re-cache the OLD file
           .then((response) => {
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             return cache.put(url, response);
