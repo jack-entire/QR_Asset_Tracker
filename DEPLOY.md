@@ -56,7 +56,9 @@ Option A (Chrome flag) for a small group, or ask IT about an internal host.
 5. Every time you `git push` an updated `index.html` (or `trial_items.csv`,
    if the register changes), the live page updates in a minute or two.
 
-Nothing here has been pushed anywhere - this is all local, waiting for you.
+This is already done for this repo - it's live at
+`https://jack-entire.github.io/QR_Asset_Tracker/index.html` (Pages serving
+`main`, root folder).
 
 ### Once it's live: make sharing it trivial
 
@@ -80,5 +82,5 @@ HTML/JS/CSS.
 Once the page has loaded once on a phone (over HTTPS or via Option A), the
 service worker (`sw.js`) caches everything, so it keeps working with no
 signal after that - reload the tab and it'll load from cache. If you change
-`index.html` later, bump `CACHE_NAME` in `sw.js` (e.g. `v1` -> `v2`) so
+`index.html` later, bump `CACHE_VERSION` in `sw.js` (e.g. `v9` -> `v10`) so
 returning phones pick up the new version instead of a stale cached one.
