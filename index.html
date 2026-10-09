@@ -688,11 +688,18 @@
   let scanIndex = buildScanIndex(scanLog);             // "TagID|ACTION" -> newest matching entry
   let speakEnabled = lsGet(GLOBAL_KEYS.speak, false);
   let silent = lsGet(GLOBAL_KEYS.silent, false) === true;   // mutes beeps, vibration and speech (flash stays)
-  // What each mode button logs. DEFECT logs a DEFECT_OPEN event and asks for a
-  // short description first (the desktop app's merge reads it from the `note`
-  // column; it needs the job's "Track defects" switched on to count it).
-  const MODE_ACTION = { DELIVERY: "DELIVERED", INSTALL: "INSTALLED", DEFECT: "DEFECT_OPEN" };
-  const ACTION_LABEL = { DEFECT_OPEN: "DEFECT" };      // friendlier word on screen; exports keep the real action
+  // Every mode button, in one place: the action it logs, its on-screen word,
+  // its CSS name (body.mode-<css>, .reg-badge-<css>), and whether a scan asks
+  // for a description first (needsNote - the defect case, which also skips the
+  // "already logged" warning because one asset can have several).
+  const MODES = {
+    DELIVERY: { action: "DELIVERED",   label: "DELIVERED", badge: "Delivered", css: "delivery" },
+    INSTALL:  { action: "INSTALLED",   label: "INSTALLED", badge: "Installed", css: "install" },
+    DEFECT:   { action: "DEFECT_OPEN", label: "DEFECT",    badge: "Defect",    css: "defect", needsNote: true,
+                toast: "Now logging: DEFECTS (you'll be asked what's wrong)" },
+  };
+  const ACTION_LABEL = Object.fromEntries(Object.values(MODES).map((m) => [m.action, m.label]));
+  const labelOf = (action) => ACTION_LABEL[action] || action;   // exports always keep the real action
   const NOTE_MAX = 140;
   let mode = "DELIVERY";                              // default for a first-ever visit; see the mode-resume
                                                         // prompt in Init below for returning-visitor behavior
@@ -1028,11 +1035,9 @@
         // this modal was opened. Nothing scanned while it's open can show up
         // here yet: withModalLock() blocks handleDecodedTag for as long as
         // the register browser stays open.
-        const delivered = scanIndex.has(scanKey(r.TagID, "DELIVERED"));
-        const installed = scanIndex.has(scanKey(r.TagID, "INSTALLED"));
-        const badges = (delivered ? '<span class="reg-badge reg-badge-delivered">Delivered</span>' : "")
-          + (installed ? '<span class="reg-badge reg-badge-installed">Installed</span>' : "")
-          + (scanIndex.has(scanKey(r.TagID, "DEFECT_OPEN")) ? '<span class="reg-badge reg-badge-defect">Defect</span>' : "");
+        const badges = Object.values(MODES)
+          .filter((m) => scanIndex.has(scanKey(r.TagID, m.action)))
+          .map((m) => `<span class="reg-badge reg-badge-${m.css}">${m.badge}</span>`).join("");
         const desc = [r.Type, r.Description].filter(Boolean).join(" — ");
         return `<div class="register-row">
           <div class="register-row-main">
@@ -1339,7 +1344,7 @@
 
   function commitScan(tagId, action, known, note) {
     recordScan(tagId, action, note);
-    const word = ACTION_LABEL[action] || action;
+    const word = labelOf(action);
     showResult({
       kind: "ok",
       title: `Logged ${word}`,
@@ -1392,9 +1397,10 @@
     // Captured NOW, at scan time: a "Log again"/"Log anyway" tapped later
     // must log what was being done when the label was scanned, even if the
     // mode toggle has been changed since.
-    const action = MODE_ACTION[mode] || "DELIVERED";
+    const def = MODES[mode];
+    const action = def.action;
     const known = findInRegister(tagId);
-    const logIt = action === "DEFECT_OPEN"
+    const logIt = def.needsNote
       ? () => askDefectAndLog(tagId, known)
       : () => commitScan(tagId, action, known);
 
@@ -1418,7 +1424,7 @@
 
     // A defect is deliberate every time (it asks for a description), and an asset
     // can have more than one, so the "already logged" warning doesn't apply.
-    const dup = action === "DEFECT_OPEN" ? null : alreadyLoggedSameAction(tagId, action);
+    const dup = def.needsNote ? null : alreadyLoggedSameAction(tagId, action);
     if (dup) {
       const dupTime = melbourneTimeOnly(new Date(dup.timestamp));
       showResult({
@@ -1809,7 +1815,7 @@
       const unknown = register && !findInRegister(s.TagID);
       return `<div class="scan-row action-${escapeHtml(s.action)}">
         <span class="tag">${escapeHtml(s.TagID)}</span>
-        <span class="act">${escapeHtml(ACTION_LABEL[s.action] || s.action)}</span>
+        <span class="act">${escapeHtml(labelOf(s.action))}</span>
         ${unknown ? '<span class="flag">not in register</span>' : ""}
         <span class="time">${escapeHtml(time)}</span>
         ${s.note ? `<span class="note">${escapeHtml(s.note)}</span>` : ""}
@@ -1842,11 +1848,11 @@
   //  scans if someone forgets to export daily). Shared by both the download
   //  button and the Share button below.
   // ===========================================================================
+  const CSV_COLS = ["TagID", "timestamp", "action", "device", "note"];
   function scansToCsv(rows) {
-    // `note` (the defect description) is the 5th column; merge_scans.py reads it
-    // when present and ignores it otherwise, so older desktop copies still merge.
-    const header = "TagID,timestamp,action,device,note";
-    const lines = rows.map((r) => [r.TagID, r.timestamp, r.action, r.device, r.note]
+    // The desktop merge reads these by name; `note` is the defect description.
+    const header = CSV_COLS.join(",");
+    const lines = rows.map((r) => CSV_COLS.map((c) => r[c])
       .map((v) => {
         v = String(v == null ? "" : v);
         return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
@@ -1933,12 +1939,10 @@
   //  Wiring
   // ===========================================================================
   function setMode(m) {
-    if (!MODE_ACTION[m]) m = "DELIVERY";        // an unknown stored mode falls back to the safe default
+    if (!MODES[m]) m = "DELIVERY";              // an unknown stored mode falls back to the safe default
     mode = m;
     document.querySelectorAll(".mode-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
-    document.body.classList.toggle("mode-delivery", m === "DELIVERY");
-    document.body.classList.toggle("mode-install", m === "INSTALL");
-    document.body.classList.toggle("mode-defect", m === "DEFECT");
+    for (const k in MODES) document.body.classList.toggle("mode-" + MODES[k].css, k === m);
     persistOrWarn(JK.mode, m);
   }
   document.querySelectorAll(".mode-btn").forEach((btn) => {
@@ -1947,8 +1951,7 @@
       setMode(btn.dataset.mode);
       if (changed) {
         vibrate(40);
-        showToast(mode === "DEFECT" ? "Now logging: DEFECTS (you'll be asked what's wrong)"
-                                    : `Now logging: ${MODE_ACTION[mode]}`);
+        showToast(MODES[mode].toast || `Now logging: ${MODES[mode].label}`);
       }
     });
   });
@@ -2151,7 +2154,7 @@
     // only runs once, for the job active at page load - switching jobs later
     // applies that job's last mode without re-prompting, see switchJob().)
     const persistedMode = lsGet(JK.mode, null);
-    if ((persistedMode === "DELIVERY" || persistedMode === "INSTALL") && persistedMode !== mode) {
+    if (MODES[persistedMode] && persistedMode !== mode) {
       const other = persistedMode === "DELIVERY" ? "INSTALL" : "DELIVERY";
       processing = true;
       try {
