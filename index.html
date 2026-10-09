@@ -187,6 +187,9 @@
   #statusRow .pill:active { opacity: 0.75; }
   .pill-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
   .pill-value { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  /* Silent: a checkbox that mutes beeps, vibration and speech (the screen still flashes). */
+  #statusRow .silent-pill { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 8px; }
+  #silentCheck { width: 26px; height: 26px; margin: 0; accent-color: var(--ink); cursor: pointer; }
   #statusRow .pill.warn { background: var(--danger-bg); border-color: var(--danger); }
   #statusRow .pill.warn .pill-value { color: var(--danger); }
 
@@ -455,6 +458,9 @@
       <button type="button" id="devicePill" class="pill" title="Tap to set this phone's device name">
         <span class="pill-label">Device</span><span class="pill-value" id="devicePillValue" aria-live="polite">not set</span>
       </button>
+      <label class="pill silent-pill" for="silentCheck" title="Mute beeps, vibration and speech - the screen still flashes">
+        <input type="checkbox" id="silentCheck"><span class="pill-label">Silent</span>
+      </label>
     </div>
   </div>
 
@@ -548,6 +554,7 @@
     activeJob: "qrtrack.activeJobId.v1",
     device: "qrtrack.device.v1",
     speak: "qrtrack.speak.v1",
+    silent: "qrtrack.silent.v1",
     theme: "qrtrack.theme.v1",
     onboarded: "qrtrack.onboarded.v1",
   };
@@ -680,6 +687,7 @@
   let scanLog = lsGet(JK.scans, []);                   // [{TagID, timestamp, action, device}], newest first
   let scanIndex = buildScanIndex(scanLog);             // "TagID|ACTION" -> newest matching entry
   let speakEnabled = lsGet(GLOBAL_KEYS.speak, false);
+  let silent = lsGet(GLOBAL_KEYS.silent, false) === true;   // mutes beeps, vibration and speech (flash stays)
   // What each mode button logs. DEFECT logs a DEFECT_OPEN event and asks for a
   // short description first (the desktop app's merge reads it from the `note`
   // column; it needs the job's "Track defects" switched on to count it).
@@ -868,6 +876,7 @@
           <strong>! Yellow</strong> — already logged with this action on this phone, so it was <em>not</em> logged again. Tap <strong>Log again</strong> if you really mean it.<br>
           <strong>✕ Red</strong> — tag isn't in the register, so it was <em>not</em> logged. Tap <strong>Log anyway</strong> to log it (it'll show in the exception report).<br>
           Each one also has its own beep and vibration. Holding a label in front of the camera won't re-scan it - move away and back to scan it again.</p>
+        <p><strong>Silent</strong> (tick box by Register/Device) — mutes the beeps, vibration and spoken results, for quiet areas. The screen still flashes and the result card still shows what happened.</p>
         <p><strong>Light</strong> (camera corner) — turns the phone's torch on/off, where the phone supports it.</p>
         <p><strong>Register / Device</strong> — tap <strong>Register</strong> to browse or search the loaded tag list (including what's already been delivered/installed); tap <strong>Device</strong> to name this phone (shown in the exported filename).</p>
         <p><strong>Export CSV</strong> — downloads every scan stored for this job. Safe to export more than once - nothing is lost by re-exporting. <strong>Share</strong> (where supported) sends it straight to Teams/email instead.</p>
@@ -1229,6 +1238,7 @@
 
   // Plays a sequence of tones: [[freqHz, durationMs, gapAfterMs, wave?], ...]
   function tones(seq, vol) {
+    if (silent) return;
     vol = vol || 0.35;
     const ctx = getAudioCtx();
     if (!ctx) return;
@@ -1253,10 +1263,11 @@
     } catch (e) { /* no audio available - not fatal */ }
   }
   function vibrate(pattern) {
+    if (silent) return;
     try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) { /* ignore */ }
   }
   function speak(text) {
-    if (!speakEnabled) return;
+    if (!speakEnabled || silent) return;
     try {
       if (!window.speechSynthesis) return;
       const u = new SpeechSynthesisUtterance(text);
@@ -1959,6 +1970,14 @@
     const name = await withModalLock(() => showDeviceNamePrompt(deviceName || ""));
     if (name) { deviceName = name; persistOrWarn(GLOBAL_KEYS.device, deviceName); renderStatus(); }
   }
+
+  const silentCheck = document.getElementById("silentCheck");
+  silentCheck.checked = silent;
+  silentCheck.addEventListener("change", () => {
+    silent = silentCheck.checked;
+    persistOrWarn(GLOBAL_KEYS.silent, silent);
+    showToast(silent ? "Silent: no beeps, vibration or speech (the screen still flashes)" : "Sound and vibration back on");
+  });
 
   function toggleSpeak() {
     speakEnabled = !speakEnabled;
