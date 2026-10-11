@@ -45,6 +45,8 @@
     --install-bg: #e9f7ec;
     --defect-color: #b3261e;
     --defect-bg: #fdeceb;
+    --info-color: #1565c0;
+    --info-bg: #e3f0fd;
     --ink: #14181c;
     --paper: #ffffff;
     --border: #c9cfd6;
@@ -80,6 +82,8 @@
     --install-bg: #163521;
     --defect-color: #ff6b61;
     --defect-bg: #3d1816;
+    --info-color: #64b5f6;
+    --info-bg: #14283d;
     --ink: #eef2f5;
     --paper: #14181c;
     --border: #3a4149;
@@ -135,6 +139,7 @@
   body.mode-delivery #topbar { background: var(--delivery-bg); }
   body.mode-install  #topbar { background: var(--install-bg); }
   body.mode-defect   #topbar { background: var(--defect-bg); }
+  body.mode-info     #topbar { background: var(--info-bg); }
 
   #jobRow {
     display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
@@ -155,7 +160,7 @@
     display: flex; gap: 8px;
   }
   .mode-btn {
-    flex: 1; min-height: 72px; padding: 10px 4px; font-size: clamp(15px, 4.6vw, 22px); font-weight: 800; letter-spacing: 0.02em;
+    flex: 1; min-height: 72px; padding: 10px 4px; font-size: clamp(12px, 3.7vw, 20px); font-weight: 800; letter-spacing: 0.02em;
     border: 3px solid var(--border); border-radius: 12px; background: var(--surface);
     color: var(--text-muted); cursor: pointer;
   }
@@ -169,6 +174,17 @@
   .mode-btn.active[data-mode="DEFECT"] {
     background: var(--defect-color); color: #fff; border-color: var(--defect-color);
   }
+  .mode-btn.active[data-mode="INFO"] {
+    background: var(--info-color); color: #fff; border-color: var(--info-color);
+  }
+  /* Asset information card (INFO mode, and tapping a row in the register browser) */
+  .info-job { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--info-color); }
+  .info-tag { margin: 2px 0 10px; font-size: 24px; word-break: break-all; }
+  .info-grid { display: grid; grid-template-columns: minmax(90px, 36%) 1fr; gap: 6px 12px; margin: 0 0 10px; font-size: 15px; }
+  .info-grid dt { color: var(--text-muted); font-weight: 600; }
+  .info-grid dd { margin: 0; word-break: break-word; }
+  .info-foot { font-size: 12px; color: var(--text-muted); }
+  .register-row.tappable { cursor: pointer; }
 
   /* Register/device status. Both pills are buttons (tap the register pill to
      browse/search it, tap the device pill to rename this phone), so each gets
@@ -450,6 +466,7 @@
       <button class="mode-btn active" data-mode="DELIVERY" type="button">DELIVERY</button>
       <button class="mode-btn" data-mode="INSTALL" type="button">INSTALL</button>
       <button class="mode-btn" data-mode="DEFECT" type="button">DEFECT</button>
+      <button class="mode-btn" data-mode="INFO" type="button">INFO</button>
     </div>
     <div id="statusRow">
       <button type="button" id="registerPill" class="pill" title="Tap to view or search the register">
@@ -704,8 +721,12 @@
     INSTALL:  { action: "INSTALLED",   label: "INSTALLED", badge: "Installed", css: "install" },
     DEFECT:   { action: "DEFECT_OPEN", label: "DEFECT",    badge: "Defect",    css: "defect", needsNote: true,
                 toast: "Now logging: DEFECTS (you'll be asked what's wrong)" },
+    // Information only: a scan shows the asset's details and the job it belongs to, and logs nothing
+    // (noLog) - no action, so it never appears in the scan list, the counts or an export.
+    INFO:     { action: null,          label: "INFO",      badge: "Info",      css: "info",   noLog: true,
+                toast: "Info mode: a scan shows the asset's details and logs nothing" },
   };
-  const ACTION_LABEL = Object.fromEntries(Object.values(MODES).map((m) => [m.action, m.label]));
+  const ACTION_LABEL = Object.fromEntries(Object.values(MODES).filter((m) => m.action).map((m) => [m.action, m.label]));
   const labelOf = (action) => ACTION_LABEL[action] || action;   // exports always keep the real action
   const NOTE_MAX = 140;
   let mode = "DELIVERY";                              // default for a first-ever visit; see the mode-resume
@@ -823,6 +844,42 @@
     });
   }
 
+  // Information card: the job a tag belongs to, its details and any extra information columns that came in the
+  // jobs file. Read-only - nothing is logged.
+  function showAssetInfo(tagId) {
+    return new Promise((resolve) => {
+      const known = findInRegister(tagId);
+      const job = (jobs.find((j) => j.id === activeJobId) || {}).label || activeJobId;
+      let body;
+      if (known) {
+        const fields = register && Array.isArray(register.infoFields) ? register.infoFields : [];
+        const info = Array.isArray(known.info) ? known.info : [];
+        const rows = [["Type", known.Type], ["Description", known.Description], ["Drawing", known.DrawingRef],
+                      ["Parent frame", known.ParentFrame]].concat(fields.map((f, i) => [f, info[i]]))
+          .filter(([, v]) => v !== undefined && v !== null && String(v) !== "");
+        body = rows.length
+          ? `<dl class="info-grid">${rows.map(([k, v]) => `<dt>${escapeHtml(String(k))}</dt><dd>${escapeHtml(String(v))}</dd>`).join("")}</dl>`
+          : `<p class="register-empty">No further information is held for this asset.</p>`;
+      } else if (!register) {
+        body = `<p class="register-empty">No register is loaded for this job, so there is no information to show.</p>`;
+      } else {
+        body = `<p class="register-empty">This tag is not in this job's register. Check that the correct job is selected.</p>`;
+      }
+      const asOf = register && register.loadedAt ? ` Register loaded ${escapeHtml(melbourneDateOnly(new Date(register.loadedAt)))}.` : "";
+      modalCard.innerHTML = `
+        <div class="info-job">${escapeHtml(job)}</div>
+        <h3 class="info-tag">${escapeHtml(tagId)}</h3>
+        ${body}
+        <p class="info-foot">Information only - nothing was logged.${asOf}</p>
+        <div class="modal-actions"><button type="button" class="btn-primary" id="modalConfirm">Close</button></div>`;
+      modalRoot.hidden = false;
+      const close = () => { closeModal(); resolve(); };
+      document.getElementById("modalConfirm").onclick = close;
+      onModalEscape = close;
+      document.getElementById("modalConfirm").focus();
+    });
+  }
+
   function showDeviceNamePrompt(existing) {
     return new Promise((resolve) => {
       modalCard.innerHTML = `
@@ -885,6 +942,7 @@
       modalCard.innerHTML = `
         <h3>Quick guide</h3>
         <p><strong>DELIVERY / INSTALL / DEFECT</strong> — sets what a scan logs. In DELIVERY and INSTALL every tag scanned is logged with that action automatically, no extra tap needed. In <strong>DEFECT</strong> mode each scan asks for a short description of what's wrong (nothing is logged until you add one); the same asset can have more than one.</p>
+        <p><strong>INFO</strong> — shows the asset's details (type, description, drawing, any extra information supplied for the job) and the job it belongs to. Nothing is logged in INFO mode. Tapping an entry in the register list shows the same card.</p>
         <p><strong>Scan results</strong> — the whole screen flashes and the card under the camera shows what happened:<br>
           <strong>✓ Green</strong> — logged.<br>
           <strong>! Yellow</strong> — already logged with this action on this phone, so it was <em>not</em> logged again. Tap <strong>Log again</strong> if you really mean it.<br>
@@ -1046,7 +1104,7 @@
           .filter((m) => scanIndex.has(scanKey(r.TagID, m.action)))
           .map((m) => `<span class="reg-badge reg-badge-${m.css}">${m.badge}</span>`).join("");
         const desc = [r.Type, r.Description].filter(Boolean).join(" — ");
-        return `<div class="register-row">
+        return `<div class="register-row tappable" data-tag="${escapeHtml(r.TagID)}">
           <div class="register-row-main">
             <span class="register-tag">${escapeHtml(r.TagID)}</span>
             ${badges}
@@ -1059,6 +1117,11 @@
     }
 
     renderResults();
+    // Tapping a row opens that asset's information card.
+    resultsEl.addEventListener("click", (ev) => {
+      const row = ev.target.closest(".register-row");
+      if (row && row.dataset.tag) { closeModal(); resolve(row.dataset.tag); }
+    });
     searchInput.addEventListener("input", renderResults);
     searchInput.focus();
 
@@ -1405,6 +1468,11 @@
     // must log what was being done when the label was scanned, even if the
     // mode toggle has been changed since.
     const def = MODES[mode];
+    if (def.noLog) {                 // INFO mode: show the asset's details, log nothing
+      vibrate(30);
+      withModalLock(() => showAssetInfo(tagId));
+      return;
+    }
     const action = def.action;
     const known = findInRegister(tagId);
     const logIt = def.needsNote
@@ -1981,13 +2049,29 @@
   //  validated with the same rule as "Add new job" - a bad entry is skipped
   //  and reported, it never aborts the rest.
   // ===========================================================================
+  // Browsers allow roughly 5 million characters of local storage per site, shared by every job's register and scan
+  // log. This estimates what the page holds so large jobs files can be flagged before they fill it.
+  const STORAGE_APPROX_LIMIT = 5000000;
+  const STORAGE_WARN_AT = 3500000;
+  const LARGE_FILE_BYTES = 1500000;
+  function storageUsedChars() {
+    let n = 0;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("qrtrack.")) n += k.length + (localStorage.getItem(k) || "").length;
+      }
+    } catch (e) { /* storage unavailable - reported as 0 */ }
+    return n;
+  }
+
   function importJobsBundle(text) {
     let data;
     try { data = JSON.parse(text); } catch (e) { throw new Error("That file isn't a valid jobs file."); }
     if (!data || data.format !== "entire-phone-jobs" || !Array.isArray(data.jobs)) {
       throw new Error("That isn't a jobs file from the desktop app's Export to phone.");
     }
-    const added = [], updated = [], skipped = [];
+    const added = [], updated = [], skipped = [], failed = [];
     let firstId = null;
     for (const j of data.jobs) {
       const id = String((j && j.id) || "").trim();
@@ -1998,12 +2082,20 @@
       const existing = jobs.find((x) => x.id.toLowerCase() === id.toLowerCase());
       const useId = existing ? existing.id : id;
       if (!existing) jobs = jobs.concat([{ id: useId, label: String(j.label || id) }]);
-      const reg = { items: items.map((r) => ({
-        TagID: String(r.TagID), Type: String(r.Type || ""), Description: String(r.Description || ""),
-        DrawingRef: String(r.DrawingRef || ""), ParentFrame: String(r.ParentFrame || ""),
-      })), loadedAt: Date.now() };
-      persistOrWarn(jobKeys(useId).register, reg);
-      (existing ? updated : added).push(`${j.label || useId} (${items.length})`);
+      const infoFields = Array.isArray(j.info_fields) ? j.info_fields.map((f) => String(f)) : [];
+      const reg = { items: items.map((r) => {
+        const it = { TagID: String(r.TagID), Type: String(r.Type || ""), Description: String(r.Description || ""),
+                     DrawingRef: String(r.DrawingRef || ""), ParentFrame: String(r.ParentFrame || "") };
+        if (infoFields.length && Array.isArray(r.info)) it.info = r.info.map((v) => (v === null || v === undefined ? "" : String(v)));
+        return it;
+      }), loadedAt: Date.now() };
+      if (infoFields.length) reg.infoFields = infoFields;
+      if (!lsSet(jobKeys(useId).register, reg)) {          // storage full or blocked: say so, never fail silently
+        showPersistBanner();
+        failed.push(String(j.label || useId));
+        continue;
+      }
+      (existing ? updated : added).push(`${j.label || useId} (${items.length}${infoFields.length ? `, ${infoFields.length} info column${infoFields.length === 1 ? "" : "s"}` : ""})`);
       if (!firstId) firstId = useId;
     }
     persistOrWarn(GLOBAL_KEYS.jobs, jobs);
@@ -2014,7 +2106,12 @@
     registerIndex = register && Array.isArray(register.items) ? buildRegisterIndex(register.items).idx : null;
     renderStatus();
     if (!jobs.some((x) => x.id === keep) && firstId) switchJob(firstId);
-    return { added, updated, skipped };
+    return { added, updated, skipped, failed, used: storageUsedChars() };
+  }
+
+  async function openRegisterBrowser() {
+    const tag = await withModalLock(showRegisterBrowser);
+    if (typeof tag === "string") await withModalLock(() => showAssetInfo(tag));
   }
 
   async function addJob() {
@@ -2049,7 +2146,7 @@
     const key = await withModalLock(showMenu);
     switch (key) {
       case "guide":    withModalLock(showHelp); break;
-      case "register": withModalLock(showRegisterBrowser); break;
+      case "register": openRegisterBrowser(); break;
       case "loadcsv":  document.getElementById("csvFileInput").click(); break;
       case "device":   setDeviceName(); break;
       case "speak":    toggleSpeak(); break;
@@ -2068,6 +2165,14 @@
     // the card and orphan the await below.
     await withModalLock(async () => {
       try {
+        if (file.size > LARGE_FILE_BYTES && /\.json$/i.test(file.name)) {
+          const go = await showConfirm({
+            title: "Large file",
+            message: `This file is ${(file.size / 1e6).toFixed(1)} MB. Every job's register is kept in this browser, which holds only about 5 MB in total, so a large file can fill it and some jobs may not load. A smaller file (fewer jobs, or fewer information columns when exporting) is safer. Continue?`,
+            confirmLabel: "Load anyway", cancelLabel: "Cancel",
+          });
+          if (!go) return;
+        }
         const text = await file.text();
         if (/\.json$/i.test(file.name) || text.trimStart().startsWith("{")) {
           const r = importJobsBundle(text);
@@ -2075,6 +2180,12 @@
           if (r.added.length) lines.push("New: " + r.added.join(", "));
           if (r.updated.length) lines.push("Updated: " + r.updated.join(", "));
           if (r.skipped.length) lines.push("Skipped: " + r.skipped.join("; "));
+          if (r.failed.length) lines.push("NOT LOADED (this phone's browser storage is full): " + r.failed.join(", "));
+          const usedMb = (r.used / 1e6).toFixed(1);
+          lines.push(`Storage in this browser: about ${usedMb} million of roughly ${STORAGE_APPROX_LIMIT / 1e6} million characters used`
+            + (r.failed.length || r.used > STORAGE_WARN_AT
+              ? ". WARNING: storage is nearly full. Export and clear old scans, remove unused jobs, or ask for a smaller jobs file (fewer jobs or fewer information columns)"
+              : ""));
           await showConfirm({
             title: "Jobs loaded",
             message: (lines.join(". ") || "Nothing to load") + ". Existing scans were not changed. Pick a job from the list at the top.",
@@ -2105,7 +2216,7 @@
     renderListSubtext();
   });
 
-  document.getElementById("registerPill").addEventListener("click", () => withModalLock(showRegisterBrowser));
+  document.getElementById("registerPill").addEventListener("click", openRegisterBrowser);
 
   document.getElementById("persistBannerClose").addEventListener("click", () => {
     document.getElementById("persistBanner").hidden = true;
