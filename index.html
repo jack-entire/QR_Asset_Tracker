@@ -504,7 +504,7 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <input type="file" id="csvFileInput" accept=".csv,text/csv" hidden>
+  <input type="file" id="csvFileInput" accept=".csv,text/csv,.json,application/json" hidden>
 
   <div id="modalRoot" hidden>
     <div class="modal-card" id="modalCard" role="dialog" aria-modal="true"></div>
@@ -911,7 +911,7 @@
       const items = [
         { key: "guide",    label: "Quick guide" },
         { key: "register", label: "Browse register", state: register && register.items && register.items.length ? `${register.items.length} items` : "none" },
-        { key: "loadcsv",  label: "Load register CSV…" },
+        { key: "loadcsv",  label: "Load jobs file / register CSV…" },
         { key: "device",   label: "Device name", state: deviceName || "not set" },
         { key: "speak",    label: "Speak results aloud", state: speakEnabled ? "ON" : "OFF" },
         { key: "theme",    label: "Theme", state: theme === "dark" ? "Dark" : "Light" },
@@ -1961,6 +1961,48 @@
     switchJob(ev.target.value);
   });
 
+  // ===========================================================================
+  //  Jobs file (.json) from the desktop app's "Export to phone": every job the
+  //  installers/drivers need, in one file. Each job gets (or keeps) its own
+  //  register; existing scans on this phone are never touched. Job ids are
+  //  validated with the same rule as "Add new job" - a bad entry is skipped
+  //  and reported, it never aborts the rest.
+  // ===========================================================================
+  function importJobsBundle(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { throw new Error("That file isn't a valid jobs file."); }
+    if (!data || data.format !== "entire-phone-jobs" || !Array.isArray(data.jobs)) {
+      throw new Error("That isn't a jobs file from the desktop app's Export to phone.");
+    }
+    const added = [], updated = [], skipped = [];
+    let firstId = null;
+    for (const j of data.jobs) {
+      const id = String((j && j.id) || "").trim();
+      const items = j && Array.isArray(j.items) ? j.items.filter((r) => r && r.TagID) : [];
+      if (!JOB_ID_RE.test(id)) { skipped.push(`${id || "(no id)"}: invalid job ID`); continue; }
+      if (!items.length) { skipped.push(`${id}: no assets`); continue; }
+      const existing = jobs.find((x) => x.id.toLowerCase() === id.toLowerCase());
+      const useId = existing ? existing.id : id;
+      if (!existing) jobs = jobs.concat([{ id: useId, label: String(j.label || id) }]);
+      const reg = { items: items.map((r) => ({
+        TagID: String(r.TagID), Type: String(r.Type || ""), Description: String(r.Description || ""),
+        DrawingRef: String(r.DrawingRef || ""), ParentFrame: String(r.ParentFrame || ""),
+      })), loadedAt: Date.now() };
+      persistOrWarn(jobKeys(useId).register, reg);
+      (existing ? updated : added).push(`${j.label || useId} (${items.length})`);
+      if (!firstId) firstId = useId;
+    }
+    persistOrWarn(GLOBAL_KEYS.jobs, jobs);
+    renderJobSelect();
+    // Whatever job is showing now must pick up its new register in memory.
+    const keep = activeJobId;
+    register = lsGet(jobKeys(keep).register, null);
+    registerIndex = register && Array.isArray(register.items) ? buildRegisterIndex(register.items).idx : null;
+    renderStatus();
+    if (!jobs.some((x) => x.id === keep) && firstId) switchJob(firstId);
+    return { added, updated, skipped };
+  }
+
   async function addJob() {
     const created = await withModalLock(showAddJobPrompt);
     if (!created) return;
@@ -2013,6 +2055,19 @@
     await withModalLock(async () => {
       try {
         const text = await file.text();
+        if (/\.json$/i.test(file.name) || text.trimStart().startsWith("{")) {
+          const r = importJobsBundle(text);
+          const lines = [];
+          if (r.added.length) lines.push("New: " + r.added.join(", "));
+          if (r.updated.length) lines.push("Updated: " + r.updated.join(", "));
+          if (r.skipped.length) lines.push("Skipped: " + r.skipped.join("; "));
+          await showConfirm({
+            title: "Jobs loaded",
+            message: (lines.join(". ") || "Nothing to load") + ". Existing scans were not changed. Pick a job from the list at the top.",
+            confirmLabel: "OK", cancelLabel: "OK",
+          });
+          return;
+        }
         const { count, duplicates } = loadRegisterFromCsvText(text);
         const dupNote = duplicates
           ? ` — ${duplicates} duplicate TagID${duplicates === 1 ? "" : "s"} found, only the first row of each was kept.`
@@ -2023,7 +2078,7 @@
           confirmLabel: "OK", cancelLabel: "OK",
         });
       } catch (e) {
-        await showConfirm({ title: "Couldn't load CSV", message: String(e.message || e), confirmLabel: "OK", cancelLabel: "OK" });
+        await showConfirm({ title: "Couldn't load file", message: String(e.message || e), confirmLabel: "OK", cancelLabel: "OK" });
       }
     });
   });
