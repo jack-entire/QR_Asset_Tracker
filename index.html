@@ -623,12 +623,18 @@
   // First run of the multi-job version (or a corrupt/cleared list): seed it
   // with this deployment's original single job, so existing data under
   // qrtrack.<BOOTSTRAP_JOB_ID>.* is picked straight up with zero migration.
+  //
+  // The "Other / Misc" job is always in the list (added here if a stored list
+  // lacks it): for scanning with no register loaded, or with no job chosen. It
+  // is "quiet" - no not-in-register errors, no startup questions (see isQuiet()
+  // below). Its id is reserved, so a jobs file or Add job can't take it.
+  const MISC_JOB_ID = "MISC";
   function loadJobList() {
     const stored = lsGet(GLOBAL_KEYS.jobs, null);
-    if (Array.isArray(stored) && stored.length) return stored;
-    const seeded = [{ id: BOOTSTRAP_JOB_ID, label: BOOTSTRAP_JOB_LABEL }];
-    persistOrWarn(GLOBAL_KEYS.jobs, seeded);
-    return seeded;
+    let list = Array.isArray(stored) && stored.length ? stored : [{ id: BOOTSTRAP_JOB_ID, label: BOOTSTRAP_JOB_LABEL }];
+    if (!list.some((j) => j.id === MISC_JOB_ID)) list = list.concat([{ id: MISC_JOB_ID, label: "Other / Misc" }]);
+    if (list !== stored) persistOrWarn(GLOBAL_KEYS.jobs, list);
+    return list;
   }
 
   function buildRegisterIndex(items) {
@@ -670,10 +676,11 @@
   let jobs = loadJobList();                           // [{id, label}, ...], display order
   let activeJobId = lsGet(GLOBAL_KEYS.activeJob, null);
   if (!activeJobId || !jobs.some((j) => j.id === activeJobId)) {
-    activeJobId = jobs[0].id;
+    activeJobId = MISC_JOB_ID;      // a device with no job chosen yet can scan straight away, with no questions
     persistOrWarn(GLOBAL_KEYS.activeJob, activeJobId);
   }
   let JK = jobKeys(activeJobId);                       // this job's register/scans/mode keys
+  const isQuiet = () => activeJobId === MISC_JOB_ID;   // Other / Misc: never complains about the register
 
   let register = lsGet(JK.register, null);            // { items: [...], loadedAt } or null
   // Array.isArray guard, not just a truthiness check on `register`: this runs at
@@ -1349,7 +1356,7 @@
       kind: "ok",
       title: `Logged ${word}`,
       tag: tagId,
-      detail: note || describeTag(known) || (register ? "" : "No register loaded - not checked"),
+      detail: note || describeTag(known) || (register || isQuiet() ? "" : "No register loaded - not checked"),
     });
     feedback("ok");
     speak(`${tagId} ${word.toLowerCase()}`);
@@ -1408,7 +1415,7 @@
     // against - a job with none (every freshly-created job, until someone
     // loads a CSV) can't tell "unknown" from "no data to check". Matches the
     // same distinction renderScanList() makes for its "not in register" flag.
-    if (register && !known) {
+    if (register && !known && !isQuiet()) {
       showResult({
         kind: "err",
         title: "Not in register",
@@ -1761,10 +1768,10 @@
   function renderStatus() {
     const pill = document.getElementById("registerPill");
     const hasRegister = !!(register && Array.isArray(register.items) && register.items.length);
-    document.getElementById("registerPillValue").textContent = hasRegister ? `${register.items.length} items` : "none loaded";
-    pill.classList.toggle("warn", !hasRegister);
-    document.getElementById("devicePillValue").textContent = deviceName || "not set - tap";
-    document.getElementById("devicePill").classList.toggle("warn", !deviceName);
+    document.getElementById("registerPillValue").textContent = hasRegister ? `${register.items.length} items` : (isQuiet() ? "not needed" : "none loaded");
+    pill.classList.toggle("warn", !hasRegister && !isQuiet());
+    document.getElementById("devicePillValue").textContent = deviceName || (isQuiet() ? "optional - tap" : "not set - tap");
+    document.getElementById("devicePill").classList.toggle("warn", !deviceName && !isQuiet());
   }
 
   function matchesScanSearch(s) {
@@ -1812,7 +1819,7 @@
     emptyEl.style.display = "none";
     listEl.innerHTML = filtered.slice(0, 200).map((s) => {
       const time = melbourneTimeOnly(new Date(s.timestamp));
-      const unknown = register && !findInRegister(s.TagID);
+      const unknown = register && !isQuiet() && !findInRegister(s.TagID);
       return `<div class="scan-row action-${escapeHtml(s.action)}">
         <span class="tag">${escapeHtml(s.TagID)}</span>
         <span class="act">${escapeHtml(labelOf(s.action))}</span>
@@ -1867,6 +1874,12 @@
       deviceName = name;
       persistOrWarn(GLOBAL_KEYS.device, deviceName);
       renderStatus();
+    }
+    // Scans made before a name was set (e.g. in Other / Misc) carry a placeholder;
+    // give them this phone's name now so the export isn't full of UNKNOWN_DEVICE.
+    if (scanLog.some((s) => s.device === "UNKNOWN_DEVICE")) {
+      scanLog.forEach((s) => { if (s.device === "UNKNOWN_DEVICE") s.device = deviceName; });
+      saveScanLog();
     }
     if (!scanLog.length) {
       await showConfirm({ title: "Nothing to export", message: "No scans recorded yet this session.", confirmLabel: "OK", cancelLabel: "OK" });
@@ -1980,6 +1993,7 @@
       const id = String((j && j.id) || "").trim();
       const items = j && Array.isArray(j.items) ? j.items.filter((r) => r && r.TagID) : [];
       if (!JOB_ID_RE.test(id)) { skipped.push(`${id || "(no id)"}: invalid job ID`); continue; }
+      if (id.toLowerCase() === MISC_JOB_ID.toLowerCase()) { skipped.push(`${id}: reserved for Other / Misc`); continue; }
       if (!items.length) { skipped.push(`${id}: no assets`); continue; }
       const existing = jobs.find((x) => x.id.toLowerCase() === id.toLowerCase());
       const useId = existing ? existing.id : id;
@@ -2187,6 +2201,20 @@
     }).catch((e) => console.warn("Auto-load of trial_items.csv skipped:", e.message || e));
   }
 
+  // A phone that starts in Other / Misc still gets the bundled register for the
+  // bootstrap job, quietly, so it's there when someone switches to it. Written
+  // straight to that job's storage - it never touches the job being shown.
+  if (activeJobId !== BOOTSTRAP_JOB_ID && jobs.some((j) => j.id === BOOTSTRAP_JOB_ID)
+      && lsGet(jobKeys(BOOTSTRAP_JOB_ID).register, null) === null && "fetch" in window) {
+    fetch("trial_items.csv").then((r) => r.ok ? r.text() : Promise.reject(new Error("no trial_items.csv")))
+      .then((text) => {
+        const items = parseCsv(text).filter((r) => r.TagID);
+        if (items.length && lsGet(jobKeys(BOOTSTRAP_JOB_ID).register, null) === null) {
+          lsSet(jobKeys(BOOTSTRAP_JOB_ID).register, { items, loadedAt: Date.now() });
+        }
+      }).catch((e) => console.warn("Background load of trial_items.csv skipped:", e.message || e));
+  }
+
   // Both startup prompts share one modal card, so they must run one after the
   // other - firing them in the same tick would let the second overwrite the
   // first's markup and leave the first's promise permanently unsettled (in
@@ -2196,7 +2224,7 @@
     // Ask for the device name up front so real scans get tagged correctly from
     // the first one, rather than only being asked the first time someone taps
     // Export.
-    if (!deviceName) await setDeviceName();
+    if (!deviceName && !isQuiet()) await setDeviceName();
 
     // Mode is deliberately NOT auto-resumed silently - a returning visitor
     // whose last mode was INSTALL gets asked to confirm before any scan can be
@@ -2209,7 +2237,9 @@
     // only runs once, for the job active at page load - switching jobs later
     // applies that job's last mode without re-prompting, see switchJob().)
     const persistedMode = lsGet(JK.mode, null);
-    if (MODES[persistedMode] && persistedMode !== mode) {
+    if (MODES[persistedMode] && persistedMode !== mode && isQuiet()) {
+      setMode(persistedMode);       // Other / Misc: pick up where it was left, no question asked
+    } else if (MODES[persistedMode] && persistedMode !== mode) {
       const other = persistedMode === "DELIVERY" ? "INSTALL" : "DELIVERY";
       processing = true;
       try {
